@@ -21,6 +21,8 @@ import androidx.activity.ComponentActivity
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
+import androidx.media3.common.PlaybackException
+import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
@@ -51,6 +53,7 @@ class MainActivity : ComponentActivity() {
     private val progressUpdater = object : Runnable {
         override fun run() {
             val player = leftPlayer
+            syncRight()
             if (player != null && !draggingSeek && player.duration > 0) {
                 seekBar.progress = ((player.currentPosition * 1000L) / player.duration).toInt().coerceIn(0, 1000)
                 timeLabel.text = "${formatTime(player.currentPosition)} / ${formatTime(player.duration)}"
@@ -179,11 +182,12 @@ class MainActivity : ComponentActivity() {
         return "%02d:%02d".format(total / 60, total % 60)
     }
 
-    private fun makePlayerView(): PlayerView = PlayerView(this).apply {
-        useController = false
-        resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
-        setBackgroundColor(Color.BLACK)
-    }
+    private fun makePlayerView(): PlayerView =
+        (layoutInflater.inflate(R.layout.vr_player_view, null, false) as PlayerView).apply {
+            useController = false
+            resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
+            setBackgroundColor(Color.BLACK)
+        }
 
     private fun makeButton(label: String, action: () -> Unit) = Button(this).apply {
         text = label
@@ -197,6 +201,9 @@ class MainActivity : ComponentActivity() {
         leftPlayer = ExoPlayer.Builder(this).build().also { leftView.player = it }
         rightPlayer = ExoPlayer.Builder(this).build().also { rightView.player = it }
         leftPlayer?.addListener(object : Player.Listener {
+            override fun onPlayerError(error: PlaybackException) {
+                status.text = "Ошибка видео: ${error.errorCodeName}"
+            }
             override fun onPlaybackStateChanged(playbackState: Int) {
                 status.text = when (playbackState) {
                     Player.STATE_BUFFERING -> "Загрузка…"
@@ -228,8 +235,8 @@ class MainActivity : ComponentActivity() {
             .setNegativeButton("Отмена", null)
             .setPositiveButton("Открыть") { _, _ ->
                 val raw = input.text.toString().trim()
-                if (raw.startsWith("http://") || raw.startsWith("https://")) loadVideo(Uri.parse(raw))
-                else Toast.makeText(this, "Нужна прямая ссылка на видеофайл", Toast.LENGTH_LONG).show()
+                if (raw.startsWith("https://")) loadVideo(Uri.parse(raw))
+                else Toast.makeText(this, "Нужна прямая HTTPS-ссылка на видеофайл, не страница YouTube", Toast.LENGTH_LONG).show()
             }.show()
     }
 
@@ -273,10 +280,11 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    @OptIn(UnstableApi::class)
     private fun applyLensDistortion() {
         if (Build.VERSION.SDK_INT < 33) {
-            leftView.setRenderEffect(null)
-            rightView.setRenderEffect(null)
+            leftView.videoSurfaceView?.setRenderEffect(null)
+            rightView.videoSurfaceView?.setRenderEffect(null)
             return
         }
         val source = """
@@ -295,13 +303,13 @@ class MainActivity : ComponentActivity() {
             }
         """.trimIndent()
         try {
-            val shader = RuntimeShader(source)
-            distortionShader = shader
             fun apply(view: PlayerView) {
-                if (view.width > 0 && view.height > 0) {
-                    shader.setFloatUniform("resolution", view.width.toFloat(), view.height.toFloat())
+                val surface = view.videoSurfaceView
+                if (surface != null && surface.width > 0 && surface.height > 0) {
+                    val shader = RuntimeShader(source)
+                    shader.setFloatUniform("resolution", surface.width.toFloat(), surface.height.toFloat())
                     shader.setFloatUniform("strength", lensDistortion)
-                    view.setRenderEffect(RenderEffect.createRuntimeShaderEffect(shader, "content"))
+                    surface.setRenderEffect(RenderEffect.createRuntimeShaderEffect(shader, "content"))
                 } else {
                     view.post { apply(view) }
                 }
