@@ -16,7 +16,7 @@ jobs:
         with:
           gradle-version: '8.9'
       - name: Build debug APK
-        run: gradle assembleDebug
+        run: gradle assembleDebug lintDebug
       - uses: actions/upload-artifact@v4
         with:
           name: VR-Vision-debug
