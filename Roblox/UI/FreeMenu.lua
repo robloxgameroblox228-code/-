@@ -206,7 +206,7 @@ topButton("—", -72, C.text, function()
     shadow.BackgroundTransparency = 0.55
 end)
 
-topButton("×", C.red, C.red, function()
+topButton("×", -32, C.red, function()
     tween(window, 0.18, {Size = UDim2.fromOffset(30, 30), BackgroundTransparency = 1})
     tween(launcher, 0.18, {BackgroundTransparency = 1})
     task.wait(0.2)
