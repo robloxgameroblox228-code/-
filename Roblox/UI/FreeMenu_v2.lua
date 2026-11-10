@@ -962,6 +962,7 @@ local function restoreMovement()
 end
 
 connectExternal(UserInputService.InputBegan, function(input, processed)
+    if processed or UserInputService:GetFocusedTextBox() then return end
     if input.KeyCode == Enum.KeyCode.LeftShift or input.KeyCode == Enum.KeyCode.RightShift then
         shiftHeld = true
         applyMovementStats()
@@ -1004,13 +1005,15 @@ connectExternal(RunService.Heartbeat, function()
         end
 
         local direction = Vector3.zero
-        if UserInputService:IsKeyDown(Enum.KeyCode.W) then direction += camera.CFrame.LookVector end
-        if UserInputService:IsKeyDown(Enum.KeyCode.S) then direction -= camera.CFrame.LookVector end
-        if UserInputService:IsKeyDown(Enum.KeyCode.D) then direction += camera.CFrame.RightVector end
-        if UserInputService:IsKeyDown(Enum.KeyCode.A) then direction -= camera.CFrame.RightVector end
-        if UserInputService:IsKeyDown(Enum.KeyCode.Space) then direction += Vector3.yAxis end
-        if UserInputService:IsKeyDown(Enum.KeyCode.LeftControl) or UserInputService:IsKeyDown(Enum.KeyCode.C) then
-            direction -= Vector3.yAxis
+        if not UserInputService:GetFocusedTextBox() then
+            if UserInputService:IsKeyDown(Enum.KeyCode.W) then direction += camera.CFrame.LookVector end
+            if UserInputService:IsKeyDown(Enum.KeyCode.S) then direction -= camera.CFrame.LookVector end
+            if UserInputService:IsKeyDown(Enum.KeyCode.D) then direction += camera.CFrame.RightVector end
+            if UserInputService:IsKeyDown(Enum.KeyCode.A) then direction -= camera.CFrame.RightVector end
+            if UserInputService:IsKeyDown(Enum.KeyCode.Space) then direction += Vector3.yAxis end
+            if UserInputService:IsKeyDown(Enum.KeyCode.LeftControl) or UserInputService:IsKeyDown(Enum.KeyCode.C) then
+                direction -= Vector3.yAxis
+            end
         end
 
         if direction.Magnitude > 1 then direction = direction.Unit end
@@ -1042,10 +1045,10 @@ end)
 
 local function movementValueCard(titleText, description, getter, setter, step, minimum, maximum, suffix)
     local f = card(82)
-    textLabel(f, titleText, UDim2.fromOffset(16, 8), UDim2.new(1, -165, 0, 22), 12, C.text, true)
-    textLabel(f, description, UDim2.fromOffset(16, 32), UDim2.new(1, -165, 0, 18), 9, C.muted)
-    local valueLabel = textLabel(f, tostring(getter()) .. (suffix or ""), UDim2.new(1, -155, 0, 25), UDim2.fromOffset(68, 28), 12, state.accent, true)
-    actionButton(f, "−", 112, 24, 34, function()
+    textLabel(f, titleText, UDim2.fromOffset(16, 8), UDim2.new(1, -245, 0, 22), 12, C.text, true)
+    textLabel(f, description, UDim2.fromOffset(16, 32), UDim2.new(1, -245, 0, 18), 9, C.muted)
+    local valueLabel = textLabel(f, tostring(getter()) .. (suffix or ""), UDim2.new(1, -230, 0, 25), UDim2.fromOffset(68, 28), 12, state.accent, true)
+    actionButton(f, "−", 104, 24, 34, function()
         setter(math.clamp(getter() - step, minimum, maximum))
         valueLabel.Text = tostring(getter()) .. (suffix or "")
         applyMovementStats()
