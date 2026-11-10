@@ -387,7 +387,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun showProfiles() {
-        val actions = arrayOf("Сохранить новый профиль", "Загрузить профиль", "Удалить профиль", "Сбросить настройки")
+        val actions = arrayOf("Сохранить новый профиль", "Загрузить профиль", "Удалить профиль", "Сбросить настройки", "Профиль Tecno Pova 6 Pro + Shinecon")
         AlertDialog.Builder(this).setTitle("Профили VR-очков").setItems(actions) { _, which ->
             when (which) {
                 0 -> {
@@ -449,6 +449,18 @@ class MainActivity : ComponentActivity() {
                 3 -> {
                     sbs = false; zoom = 1f; eyeOffset = 0f; leftEyeX = 0f; rightEyeX = 0f; leftEyeY = 0f; rightEyeY = 0f; lensDistortion = 0f; mask = 0; grid = false
                     updateMode(); cycleMaskReset(); applyLayoutMode(); applyLensDistortion(); saveSettings()
+                }
+                4 -> {
+                    sbs = false
+                    zoom = 1f
+                    eyeOffset = 0f
+                    leftEyeX = 0f; rightEyeX = 0f; leftEyeY = 0f; rightEyeY = 0f
+                    lensDistortion = 0f
+                    mask = 0
+                    grid = false
+                    updateMode(); cycleMaskReset(); applyLayoutMode(); applyLensDistortion(); saveSettings()
+                    status.text = "Профиль Tecno + Shinecon загружен — настрой линзы регуляторами очков"
+                    Toast.makeText(this, "Базовый профиль применён. Точную центровку выполни в настройках изображения.", Toast.LENGTH_LONG).show()
                 }
             }
         }.show()
