@@ -7,15 +7,17 @@ An early Android VR video-player prototype for phone-based cardboard viewers.
 - Open a direct HTTP/HTTPS video URL
 - Two synchronized eye players for side-by-side viewing
 - Mono mode duplicates the same video for both eyes
-- Playback and seek controls are provided in the player interface
+- Synchronized play/pause, seek bar and time display for both eyes
+- Shared volume slider
 - Immersive landscape mode and keep-screen-awake
 - Image zoom and horizontal eye offset controls
+- GPU radial lens-distortion correction on Android 13+ (adjustable and saved in profiles)
 - Circular, oval and rounded-rectangle viewing masks
 - Calibration grid overlay
-- Save/load the current headset settings locally
+- Named headset profiles: save, load, delete and reset settings locally
 
 ## Important limitations
-This is a prototype and has not yet been tested on a physical headset. Lens masks and basic image alignment are implemented, but a calibrated optical barrel/pincushion distortion shader, independent left/right eye geometry controls, robust multi-profile naming, YouTube playback, and broad network-stream compatibility are not implemented. SBS mode expects a side-by-side source video. Direct URL playback requires a direct media URL, not a normal YouTube page.
+This is still a prototype and has not yet been validated on a physical headset. The radial distortion control is a general GPU correction, not a per-headset calibrated optical profile; its effect depends on the phone and lens geometry. Android versions below 13 do not apply the shader. SBS mode expects a side-by-side source video. Direct URL playback requires a direct media URL, not a normal YouTube page. YouTube pages and every possible network stream format are not supported. SBS mode expects a side-by-side source video. Direct URL playback requires a direct media URL, not a normal YouTube page.
 
 ## Build APK
 1. Open the Actions tab.
