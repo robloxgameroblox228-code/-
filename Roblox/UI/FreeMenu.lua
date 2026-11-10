@@ -542,6 +542,10 @@ local function applyTheme()
             if obj:IsA("TextButton") or obj:IsA("TextBox") or obj:IsA("TextLabel") then
                 obj.TextColor3 = Color3.fromRGB(15,18,25)
             end
+        elseif role == "accentText" then
+            if obj:IsA("TextLabel") or obj:IsA("TextButton") or obj:IsA("TextBox") then
+                obj.TextColor3 = state.accent
+            end
         elseif role == "tab" then
             obj.BackgroundColor3 = obj.Name == activePage and C.hover or C.panel
             obj.TextColor3 = obj.Name == activePage and state.accent or C.muted
@@ -571,9 +575,11 @@ local function addToggle(titleText, desc, getter, setter)
     local b
     b = actionButton(f, getter() and "ВКЛЮЧЕНО" or "ВЫКЛЮЧЕНО", 14, 19, 112, function()
         setter(not getter())
-        b.Text = getter() and "ВКЛЮЧЕНО" or "ВЫКЛЮЧЕНО"
-        b.BackgroundColor3 = getter() and state.accent or C.hover
-        b.TextColor3 = getter() and Color3.fromRGB(15,18,25) or C.text
+        local enabled = getter()
+        b.Text = enabled and "ВКЛЮЧЕНО" or "ВЫКЛЮЧЕНО"
+        b:SetAttribute("FreeRole", enabled and "accent" or "hover")
+        b.BackgroundColor3 = enabled and state.accent or C.hover
+        b.TextColor3 = enabled and Color3.fromRGB(15,18,25) or C.text
     end, not getter())
     if not getter() then
         b.BackgroundColor3 = C.hover
@@ -795,7 +801,7 @@ local function buildVisuals()
         for i,color in ipairs(colors) do
             local dot=make("TextButton",{Position=UDim2.fromOffset(16+(i-1)*39,37),Size=UDim2.fromOffset(26,26),BackgroundColor3=color,Text="",AutoButtonColor=false,ZIndex=8},cf)
             round(dot,13); stroke(dot,C.line)
-            dot.MouseButton1Click:Connect(function() state.espColor=color; refreshPlayerVisuals(); refreshOwnEffects() end)
+            dot.Activated:Connect(function() state.espColor=color; refreshPlayerVisuals(); refreshOwnEffects() end)
         end
     end
     sectionHeader("Надо мной","Шляпа, след и частицы вокруг твоего персонажа",state.ownExpanded,function()
@@ -842,7 +848,7 @@ local function buildSettings()
             ZIndex = 8
         }, f, "hover")
         round(b, 8)
-        b.MouseButton1Click:Connect(function()
+        b.Activated:Connect(function()
             state.theme = (i == 1 and "Dark") or (i == 2 and "Light") or "Custom"
             applyTheme()
             notify("Тема изменена", name)
@@ -948,17 +954,14 @@ local function buildSettings()
     textLabel(geometry,"Масштаб и прозрачность главного меню",UDim2.fromOffset(16,32),UDim2.new(1,-30,0,18),9,C.muted)
     local geometryInfo = textLabel(geometry,
         string.format("Масштаб: %d%%  •  Прозрачность: %d%%", math.floor(state.scale*100), math.floor(state.transparency*100)),
-        UDim2.fromOffset(16, 60), UDim2.new(1, -330, 0, 24), 9, C.muted, false)
-    local scaleLabel = textLabel(geometry,string.format("%d%%",math.floor(state.scale*100)),UDim2.new(1,-255,0,60),UDim2.fromOffset(55,24),10,state.accent,true)
+        UDim2.fromOffset(16, 32), UDim2.new(1, -30, 0, 18), 9, C.muted, false)
     actionButton(geometry,"−",120,56,32,function()
         state.scale=math.clamp(state.scale-0.05,0.75,1.2)
-        scaleLabel.Text=string.format("%d%%",math.floor(state.scale*100))
         geometryInfo.Text=string.format("Масштаб: %d%%  •  Прозрачность: %d%%", math.floor(state.scale*100), math.floor(state.transparency*100))
         setWindowSize()
     end,true)
     actionButton(geometry,"+",16,56,32,function()
         state.scale=math.clamp(state.scale+0.05,0.75,1.2)
-        scaleLabel.Text=string.format("%d%%",math.floor(state.scale*100))
         geometryInfo.Text=string.format("Масштаб: %d%%  •  Прозрачность: %d%%", math.floor(state.scale*100), math.floor(state.transparency*100))
         setWindowSize()
     end,true)
@@ -989,7 +992,7 @@ local function showPage(name)
 end
 for name, b in pairs(tabButtons) do
     b.Name = name
-    b.MouseButton1Click:Connect(function() showPage(name) end)
+    b.Activated:Connect(function() showPage(name) end)
 end
 
 local function openMenu()
