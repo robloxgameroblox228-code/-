@@ -393,7 +393,7 @@ local function addToggle(title,description,getter,setter)
     local f=card(66)
     label(f,title,8,12)
     label(f,description,33,9,C.muted)
-    local b=button(f,getter() and "ВКЛ" or "ВЫКЛ",12,18,62,function()
+    local b\n    b=button(f,getter() and "ВКЛ" or "ВЫКЛ",12,18,62,function()
         setter(not getter())
         b.Text=getter() and "ВКЛ" or "ВЫКЛ"
         b.BackgroundColor3=getter() and state.accent or C.line
