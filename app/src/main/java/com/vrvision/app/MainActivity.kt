@@ -315,8 +315,8 @@ class MainActivity : ComponentActivity() {
         val w = stage.width.toFloat()
         val h = stage.height.toFloat()
         if (w <= 0f || h <= 0f) return
-        val size = min(w * 0.36f, h * 0.645f).toInt().coerceAtLeast(1)
-        val centerY = h * 0.427f
+        val size = min(w * 0.365f, h * 0.82f).toInt().coerceAtLeast(1)
+        val centerY = h * 0.54f
         leftLens.layoutParams = (leftLens.layoutParams ?: FrameLayout.LayoutParams(size, size)).also {
             it.width = size; it.height = size
         }
@@ -617,8 +617,8 @@ class MainActivity : ComponentActivity() {
         override fun onDraw(canvas: Canvas) {
             super.onDraw(canvas)
             val half = width / 2f
-            val eyeUnit = min(width * 0.36f, height * 0.645f)
-            val eyeCenterY = height * 0.427f
+            val eyeUnit = min(width * 0.365f, height * 0.82f)
+            val eyeCenterY = height * 0.54f
             if (mask != 0) {
                 val path = Path().apply {
                     fillType = Path.FillType.EVEN_ODD
