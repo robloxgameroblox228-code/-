@@ -1,4 +1,4 @@
--- FREE MENU v2.0 | reviewed and hardened UI build
+-- FREE MENU v3.0 | movement tools and reviewed UI build
 -- Sections: Test, Visuals, Movement, Settings. Character movement tools included.
 
 local Players = game:GetService("Players")
@@ -404,7 +404,7 @@ local status = make("TextLabel", {
     BackgroundTransparency = 1,
     Position = UDim2.new(0, 14, 1, -30),
     Size = UDim2.new(1, -28, 0, 16),
-    Text = "FREE BUILD  •  2.0",
+    Text = "FREE BUILD  •  3.0",
     Font = Enum.Font.Gotham,
     TextSize = 9,
     TextXAlignment = Enum.TextXAlignment.Left,
@@ -962,7 +962,7 @@ local function restoreMovement()
 end
 
 connectExternal(UserInputService.InputBegan, function(input, processed)
-    if processed or UserInputService:GetFocusedTextBox() then return end
+    if UserInputService:GetFocusedTextBox() then return end
     if input.KeyCode == Enum.KeyCode.LeftShift or input.KeyCode == Enum.KeyCode.RightShift then
         shiftHeld = true
         applyMovementStats()
@@ -978,6 +978,9 @@ end)
 
 connectExternal(RunService.Heartbeat, function()
     if not gui.Parent then return end
+    if UserInputService:GetFocusedTextBox() and shiftHeld then
+        shiftHeld = false
+    end
     if state.speedEnabled or (state.sprintEnabled and shiftHeld) or state.jumpEnabled then
         applyMovementStats()
     end
@@ -1018,7 +1021,7 @@ connectExternal(RunService.Heartbeat, function()
 
         if direction.Magnitude > 1 then direction = direction.Unit end
         flyVelocity.Velocity = direction * state.flySpeed
-        flyGyro.CFrame = CFrame.lookAt(root.Position, root.Position + camera.CFrame.LookVector)
+        flyGyro.CFrame = camera.CFrame
     elseif state.fly then
         setFly(false)
     end
