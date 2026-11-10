@@ -255,22 +255,40 @@ local RunService = game:GetService("RunService")
 local oldMouseBehavior, oldMouseIcon
 local cursorLoop
 local function unlockCursor()
-    oldMouseBehavior = UserInputService.MouseBehavior
-    oldMouseIcon = UserInputService.MouseIconEnabled
-    UserInputService.MouseBehavior = Enum.MouseBehavior.Default
-    UserInputService.MouseIconEnabled = true
-    if cursorLoop then cursorLoop:Disconnect() end
+    pcall(function()
+        oldMouseBehavior = UserInputService.MouseBehavior
+        oldMouseIcon = UserInputService.MouseIconEnabled
+        UserInputService.MouseBehavior = Enum.MouseBehavior.Default
+        UserInputService.MouseIconEnabled = true
+    end)
+
+    if cursorLoop then
+        pcall(function() cursorLoop:Disconnect() end)
+        cursorLoop = nil
+    end
+
     cursorLoop = RunService.RenderStepped:Connect(function()
         if opened and gui.Parent then
-            UserInputService.MouseBehavior = Enum.MouseBehavior.Default
-            UserInputService.MouseIconEnabled = true
+            pcall(function()
+                UserInputService.MouseBehavior = Enum.MouseBehavior.Default
+                UserInputService.MouseIconEnabled = true
+            end)
         end
     end)
 end
+
 local function restoreCursor()
-    if cursorLoop then cursorLoop:Disconnect(); cursorLoop = nil end
-    if oldMouseBehavior then UserInputService.MouseBehavior = oldMouseBehavior end
-    if oldMouseIcon ~= nil then UserInputService.MouseIconEnabled = oldMouseIcon end
+    if cursorLoop then
+        pcall(function() cursorLoop:Disconnect() end)
+        cursorLoop = nil
+    end
+
+    if oldMouseBehavior ~= nil then
+        pcall(function() UserInputService.MouseBehavior = oldMouseBehavior end)
+    end
+    if oldMouseIcon ~= nil then
+        pcall(function() UserInputService.MouseIconEnabled = oldMouseIcon end)
+    end
 end
 local baseSize = Vector2.new(760, 510)
 local function getDisplayScale()
