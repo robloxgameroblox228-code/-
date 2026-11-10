@@ -6,6 +6,9 @@ import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.Path
+import android.graphics.RenderEffect
+import android.graphics.RuntimeShader
+import android.os.Build
 import android.net.Uri
 import android.os.Bundle
 import android.os.Handler
@@ -38,6 +41,8 @@ class MainActivity : ComponentActivity() {
     private var mask = 0 // 0 none, 1 round, 2 oval, 3 rounded rectangle
     private var zoom = 1.0f
     private var eyeOffset = 0.0f
+    private var lensDistortion = 0.0f
+    private var distortionShader: RuntimeShader? = null
     private var currentUri: Uri? = null
     private lateinit var seekBar: SeekBar
     private lateinit var timeLabel: TextView
@@ -69,6 +74,7 @@ class MainActivity : ComponentActivity() {
         loadSettings()
         buildUi()
         applyLayoutMode()
+        applyLensDistortion()
         immersive()
         uiHandler.post(progressUpdater)
     }
@@ -267,6 +273,46 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    private fun applyLensDistortion() {
+        if (Build.VERSION.SDK_INT < 33) {
+            leftView.setRenderEffect(null)
+            rightView.setRenderEffect(null)
+            return
+        }
+        val source = """
+            uniform shader content;
+            uniform float2 resolution;
+            uniform float strength;
+            half4 main(float2 coord) {
+                float2 uv = coord / resolution;
+                float2 p = (uv - float2(0.5, 0.5)) * 2.0;
+                float r2 = dot(p, p);
+                float2 warped = float2(0.5, 0.5) + p * (1.0 + strength * r2) * 0.5;
+                if (warped.x < 0.0 || warped.x > 1.0 || warped.y < 0.0 || warped.y > 1.0) {
+                    return half4(0.0, 0.0, 0.0, 1.0);
+                }
+                return content.eval(warped * resolution);
+            }
+        """.trimIndent()
+        try {
+            val shader = RuntimeShader(source)
+            distortionShader = shader
+            fun apply(view: PlayerView) {
+                if (view.width > 0 && view.height > 0) {
+                    shader.setFloatUniform("resolution", view.width.toFloat(), view.height.toFloat())
+                    shader.setFloatUniform("strength", lensDistortion)
+                    view.setRenderEffect(RenderEffect.createRuntimeShaderEffect(shader, "content"))
+                } else {
+                    view.post { apply(view) }
+                }
+            }
+            apply(leftView)
+            apply(rightView)
+        } catch (_: Exception) {
+            Toast.makeText(this, "Не удалось применить коррекцию линз", Toast.LENGTH_SHORT).show()
+        }
+    }
+
     private fun cycleMask() {
         mask = (mask + 1) % 4
         maskButton.text = listOf("Маска: выкл.", "Маска: круг", "Маска: овал", "Маска: прямоуг.")[mask]
@@ -286,6 +332,11 @@ class MainActivity : ComponentActivity() {
         }
         addSlider("Масштаб", ((zoom - 0.7f) * 100).toInt().coerceIn(0, 100), 100) { zoom = 0.7f + it / 100f; applyLayoutMode(); saveSettings() }
         addSlider("Разделение глаз", ((eyeOffset + 100) * 1.5f).toInt().coerceIn(0, 300), 300) { eyeOffset = it / 1.5f - 100f; applyLayoutMode(); saveSettings() }
+        addSlider("Коррекция линз", ((lensDistortion + 0.35f) * 100f / 0.7f).toInt().coerceIn(0, 100), 100) {
+            lensDistortion = it / 100f * 0.7f - 0.35f
+            applyLensDistortion()
+            saveSettings()
+        }
         AlertDialog.Builder(this).setTitle("Настройки изображения").setView(panel).setPositiveButton("Готово", null).show()
     }
 
@@ -305,7 +356,7 @@ class MainActivity : ComponentActivity() {
                                 val key = "profile_" + name
                                 prefs.edit().putBoolean(key + "_sbs", sbs).putBoolean(key + "_grid", grid)
                                     .putInt(key + "_mask", mask).putFloat(key + "_zoom", zoom)
-                                    .putFloat(key + "_offset", eyeOffset).putStringSet("profile_names",
+                                    .putFloat(key + "_offset", eyeOffset).putFloat(key + "_distortion", lensDistortion).putStringSet("profile_names",
                                         (prefs.getStringSet("profile_names", emptySet()) ?: emptySet()) + name).apply()
                                 Toast.makeText(this, "Профиль «$name» сохранён", Toast.LENGTH_SHORT).show()
                             }
@@ -326,14 +377,16 @@ class MainActivity : ComponentActivity() {
                                     mask = prefs.getInt(key + "_mask", 0)
                                     zoom = prefs.getFloat(key + "_zoom", 1f)
                                     eyeOffset = prefs.getFloat(key + "_offset", 0f)
+                                    lensDistortion = prefs.getFloat(key + "_distortion", 0f)
                                     updateMode()
                                     cycleMaskReset()
                                     overlay.invalidate()
                                     applyLayoutMode()
+                                    applyLensDistortion()
                                     Toast.makeText(this, "Загружен профиль «$name»", Toast.LENGTH_SHORT).show()
                                 } else {
                                     prefs.edit().remove(key + "_sbs").remove(key + "_grid").remove(key + "_mask")
-                                        .remove(key + "_zoom").remove(key + "_offset")
+                                        .remove(key + "_zoom").remove(key + "_offset").remove(key + "_distortion")
                                         .putStringSet("profile_names", names.filter { it != name }.toSet()).apply()
                                     Toast.makeText(this, "Профиль удалён", Toast.LENGTH_SHORT).show()
                                 }
@@ -341,8 +394,8 @@ class MainActivity : ComponentActivity() {
                     }
                 }
                 3 -> {
-                    sbs = false; zoom = 1f; eyeOffset = 0f; mask = 0; grid = false
-                    updateMode(); cycleMaskReset(); applyLayoutMode(); saveSettings()
+                    sbs = false; zoom = 1f; eyeOffset = 0f; lensDistortion = 0f; mask = 0; grid = false
+                    updateMode(); cycleMaskReset(); applyLayoutMode(); applyLensDistortion(); saveSettings()
                 }
             }
         }.show()
@@ -355,7 +408,7 @@ class MainActivity : ComponentActivity() {
 
     private fun saveSettings() {
         prefs.edit().putBoolean("sbs", sbs).putBoolean("grid", grid).putInt("mask", mask)
-            .putFloat("zoom", zoom).putFloat("offset", eyeOffset).apply()
+            .putFloat("zoom", zoom).putFloat("offset", eyeOffset).putFloat("distortion", lensDistortion).apply()
     }
 
     private fun loadSettings() {
@@ -364,6 +417,7 @@ class MainActivity : ComponentActivity() {
         mask = prefs.getInt("mask", 0)
         zoom = prefs.getFloat("zoom", 1f)
         eyeOffset = prefs.getFloat("offset", 0f)
+        lensDistortion = prefs.getFloat("distortion", 0f)
     }
 
     inner class CalibrationOverlay : View(this) {
