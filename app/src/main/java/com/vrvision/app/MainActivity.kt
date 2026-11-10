@@ -605,7 +605,7 @@ class MainActivity : ComponentActivity() {
                 for (i in 0..1) {
                     val cx = half * (i + 0.5f)
                     val cy = height / 2f
-                    val unit = min(half, height)
+                    val unit = min(half, height.toFloat())
                     paint.style = Paint.Style.STROKE
                     paint.color = Color.WHITE
                     paint.strokeWidth = 1.5f
@@ -679,11 +679,11 @@ class MainActivity : ComponentActivity() {
                 for (i in 0..1) {
                     val cx = half * (i + 0.5f); val cy = height / 2f
                     paint.color = 0xFFFFD54F.toInt(); paint.strokeWidth = 2f; paint.style = Paint.Style.STROKE
-                    canvas.drawCircle(cx, cy, min(half, height) * 0.16f, paint)
+                    canvas.drawCircle(cx, cy, min(half, height.toFloat()) * 0.16f, paint)
                     canvas.drawLine(cx - 34f, cy, cx + 34f, cy, paint)
                     canvas.drawLine(cx, cy - 34f, cx, cy + 34f, paint)
                     paint.color = Color.WHITE; paint.style = Paint.Style.FILL; paint.textSize = 22f
-                    canvas.drawText(if (i == 0) "L" else "R", cx - 7f, cy - min(half, height) * 0.22f, paint)
+                    canvas.drawText(if (i == 0) "L" else "R", cx - 7f, cy - min(half, height.toFloat()) * 0.22f, paint)
                 }
                 paint.style = Paint.Style.FILL
             }
