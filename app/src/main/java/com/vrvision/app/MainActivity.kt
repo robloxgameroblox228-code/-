@@ -50,6 +50,9 @@ class MainActivity : ComponentActivity() {
     private var rightEyeX = 0.0f
     private var leftEyeY = 0.0f
     private var rightEyeY = 0.0f
+    private var leftEyeScale = 1.0f
+    private var rightEyeScale = 1.0f
+    private var calibrationPattern = false
     private var lensDistortion = 0.0f
     private var distortionShader: RuntimeShader? = null
     private var currentUri: Uri? = null
@@ -174,6 +177,9 @@ class MainActivity : ComponentActivity() {
         row2.addView(makeButton("Настройки") { showSettings() })
         row2.addView(makeButton("Профили") { showProfiles() })
         controlsPanel.addView(row2)
+        val row3 = LinearLayout(this).apply { gravity = Gravity.CENTER; orientation = LinearLayout.HORIZONTAL }
+        row3.addView(makeButton("Калибровка") { showCalibration() })
+        controlsPanel.addView(row3)
 
         stage = FrameLayout(this).apply {
             setBackgroundColor(Color.BLACK)
@@ -312,8 +318,15 @@ class MainActivity : ComponentActivity() {
             }
             leftView.translationY = leftEyeY
             rightView.translationY = rightEyeY
-            leftView.scaleY = zoom
-            rightView.scaleY = zoom
+            leftView.scaleY = zoom * leftEyeScale
+            rightView.scaleY = zoom * rightEyeScale
+            if (sbs) {
+                leftView.scaleX = 2f * zoom * leftEyeScale
+                rightView.scaleX = 2f * zoom * rightEyeScale
+            } else {
+                leftView.scaleX = zoom * leftEyeScale
+                rightView.scaleX = zoom * rightEyeScale
+            }
             overlay.invalidate()
         }
     }
@@ -378,12 +391,51 @@ class MainActivity : ComponentActivity() {
         addSlider("Правый глаз: влево / вправо", ((rightEyeX + 120f) / 240f * 100f).toInt().coerceIn(0, 100), 100) { rightEyeX = it / 100f * 240f - 120f; applyLayoutMode(); saveSettings() }
         addSlider("Левый глаз: вверх / вниз", ((leftEyeY + 120f) / 240f * 100f).toInt().coerceIn(0, 100), 100) { leftEyeY = it / 100f * 240f - 120f; applyLayoutMode(); saveSettings() }
         addSlider("Правый глаз: вверх / вниз", ((rightEyeY + 120f) / 240f * 100f).toInt().coerceIn(0, 100), 100) { rightEyeY = it / 100f * 240f - 120f; applyLayoutMode(); saveSettings() }
+        addSlider("Масштаб левого глаза", ((leftEyeScale - 0.7f) * 100f / 0.6f).toInt().coerceIn(0, 100), 100) { leftEyeScale = 0.7f + it / 100f * 0.6f; applyLayoutMode(); saveSettings() }
+        addSlider("Масштаб правого глаза", ((rightEyeScale - 0.7f) * 100f / 0.6f).toInt().coerceIn(0, 100), 100) { rightEyeScale = 0.7f + it / 100f * 0.6f; applyLayoutMode(); saveSettings() }
         addSlider("Коррекция линз", ((lensDistortion + 0.35f) * 100f / 0.7f).toInt().coerceIn(0, 100), 100) {
             lensDistortion = it / 100f * 0.7f - 0.35f
             applyLensDistortion()
             saveSettings()
         }
-        AlertDialog.Builder(this).setTitle("Настройки изображения").setView(panel).setPositiveButton("Готово", null).show()
+        AlertDialog.Builder(this).setTitle("Настройки изображения").setView(ScrollView(this).apply { addView(panel) }).setPositiveButton("Готово", null).show()
+    }
+
+    private fun showCalibration() {
+        val previousGrid = grid
+        val previousPattern = calibrationPattern
+        grid = true; calibrationPattern = true; overlay.invalidate()
+        val panel = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(24, 8, 24, 8) }
+        panel.addView(TextView(this).apply { text = "Надень очки. Настраивай левую и правую половины отдельно. Совмещай крестик с центром обзора, затем проверь мелкий текст и линии."; setTextColor(Color.WHITE); textSize = 14f; setPadding(0,0,0,12) })
+        fun slider(label: String, initial: Int, max: Int, change: (Int) -> Unit) {
+            panel.addView(TextView(this).apply { text = label; setTextColor(Color.WHITE); textSize = 13f })
+            panel.addView(SeekBar(this).apply { this.max = max; progress = initial
+                setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+                    override fun onProgressChanged(bar: SeekBar?, value: Int, fromUser: Boolean) { if (fromUser) change(value) }
+                    override fun onStartTrackingTouch(bar: SeekBar?) {}
+                    override fun onStopTrackingTouch(bar: SeekBar?) {}
+                })
+            })
+        }
+        slider("Левый глаз: влево / вправо", ((leftEyeX + 120f) / 240f * 100).toInt().coerceIn(0,100),100) { leftEyeX = it / 100f * 240f - 120f; applyLayoutMode(); saveSettings() }
+        slider("Левый глаз: вверх / вниз", ((leftEyeY + 120f) / 240f * 100).toInt().coerceIn(0,100),100) { leftEyeY = it / 100f * 240f - 120f; applyLayoutMode(); saveSettings() }
+        slider("Левый глаз: масштаб", ((leftEyeScale - .7f) / .6f * 100).toInt().coerceIn(0,100),100) { leftEyeScale = .7f + it / 100f * .6f; applyLayoutMode(); saveSettings() }
+        slider("Правый глаз: влево / вправо", ((rightEyeX + 120f) / 240f * 100).toInt().coerceIn(0,100),100) { rightEyeX = it / 100f * 240f - 120f; applyLayoutMode(); saveSettings() }
+        slider("Правый глаз: вверх / вниз", ((rightEyeY + 120f) / 240f * 100).toInt().coerceIn(0,100),100) { rightEyeY = it / 100f * 240f - 120f; applyLayoutMode(); saveSettings() }
+        slider("Правый глаз: масштаб", ((rightEyeScale - .7f) / .6f * 100).toInt().coerceIn(0,100),100) { rightEyeScale = .7f + it / 100f * .6f; applyLayoutMode(); saveSettings() }
+        slider("Расстояние между изображениями", ((eyeOffset + 100f) / 200f * 100).toInt().coerceIn(0,100),100) { eyeOffset = it / 100f * 200f - 100f; applyLayoutMode(); saveSettings() }
+        val dialog = AlertDialog.Builder(this).setTitle("Калибровка Tecno + Shinecon")
+            .setView(ScrollView(this).apply { addView(panel) })
+            .setNeutralButton("Автоподгонка") { _, _ ->
+                zoom = 1f; eyeOffset = 0f; leftEyeX = 0f; rightEyeX = 0f; leftEyeY = 0f; rightEyeY = 0f
+                leftEyeScale = 1f; rightEyeScale = 1f; lensDistortion = 0f
+                applyLayoutMode(); applyLensDistortion(); saveSettings()
+                Toast.makeText(this, "Начальная центровка установлена — при необходимости доведи вручную.", Toast.LENGTH_LONG).show()
+            }
+            .setPositiveButton("Готово", null)
+            .setOnDismissListener { grid = previousGrid; calibrationPattern = previousPattern; overlay.invalidate(); saveSettings() }
+            .create()
+        dialog.show()
     }
 
     private fun showProfiles() {
@@ -404,6 +456,7 @@ class MainActivity : ComponentActivity() {
                                     .putInt(key + "_mask", mask).putFloat(key + "_zoom", zoom)
                                     .putFloat(key + "_offset", eyeOffset).putFloat(key + "_left_x", leftEyeX).putFloat(key + "_right_x", rightEyeX)
                                     .putFloat(key + "_left_y", leftEyeY).putFloat(key + "_right_y", rightEyeY)
+                                    .putFloat(key + "_left_scale", leftEyeScale).putFloat(key + "_right_scale", rightEyeScale)
                                     .putFloat(key + "_distortion", lensDistortion).putStringSet("profile_names",
                                         (prefs.getStringSet("profile_names", emptySet()) ?: emptySet()) + name).apply()
                                 Toast.makeText(this, "Профиль «$name» сохранён", Toast.LENGTH_SHORT).show()
@@ -429,6 +482,8 @@ class MainActivity : ComponentActivity() {
                                     rightEyeX = prefs.getFloat(key + "_right_x", 0f)
                                     leftEyeY = prefs.getFloat(key + "_left_y", 0f)
                                     rightEyeY = prefs.getFloat(key + "_right_y", 0f)
+                                    leftEyeScale = prefs.getFloat(key + "_left_scale", 1f)
+                                    rightEyeScale = prefs.getFloat(key + "_right_scale", 1f)
                                     lensDistortion = prefs.getFloat(key + "_distortion", 0f)
                                     updateMode()
                                     cycleMaskReset()
@@ -439,7 +494,7 @@ class MainActivity : ComponentActivity() {
                                 } else {
                                     prefs.edit().remove(key + "_sbs").remove(key + "_grid").remove(key + "_mask")
                                         .remove(key + "_zoom").remove(key + "_offset").remove(key + "_left_x").remove(key + "_right_x")
-                                        .remove(key + "_left_y").remove(key + "_right_y").remove(key + "_distortion")
+                                        .remove(key + "_left_y").remove(key + "_right_y").remove(key + "_left_scale").remove(key + "_right_scale").remove(key + "_distortion")
                                         .putStringSet("profile_names", names.filter { it != name }.toSet()).apply()
                                     Toast.makeText(this, "Профиль удалён", Toast.LENGTH_SHORT).show()
                                 }
@@ -447,7 +502,7 @@ class MainActivity : ComponentActivity() {
                     }
                 }
                 3 -> {
-                    sbs = false; zoom = 1f; eyeOffset = 0f; leftEyeX = 0f; rightEyeX = 0f; leftEyeY = 0f; rightEyeY = 0f; lensDistortion = 0f; mask = 0; grid = false
+                    sbs = false; zoom = 1f; eyeOffset = 0f; leftEyeX = 0f; rightEyeX = 0f; leftEyeY = 0f; rightEyeY = 0f; leftEyeScale = 1f; rightEyeScale = 1f; lensDistortion = 0f; mask = 0; grid = false
                     updateMode(); cycleMaskReset(); applyLayoutMode(); applyLensDistortion(); saveSettings()
                 }
                 4 -> {
@@ -455,6 +510,7 @@ class MainActivity : ComponentActivity() {
                     zoom = 1f
                     eyeOffset = 0f
                     leftEyeX = 0f; rightEyeX = 0f; leftEyeY = 0f; rightEyeY = 0f
+                    leftEyeScale = 1f; rightEyeScale = 1f
                     lensDistortion = 0f
                     mask = 0
                     grid = false
@@ -474,7 +530,8 @@ class MainActivity : ComponentActivity() {
     private fun saveSettings() {
         prefs.edit().putBoolean("sbs", sbs).putBoolean("grid", grid).putInt("mask", mask)
             .putFloat("zoom", zoom).putFloat("offset", eyeOffset).putFloat("left_x", leftEyeX).putFloat("right_x", rightEyeX)
-            .putFloat("left_y", leftEyeY).putFloat("right_y", rightEyeY).putFloat("distortion", lensDistortion).apply()
+            .putFloat("left_y", leftEyeY).putFloat("right_y", rightEyeY).putFloat("left_scale", leftEyeScale)
+            .putFloat("right_scale", rightEyeScale).putFloat("distortion", lensDistortion).apply()
     }
 
     private fun loadSettings() {
@@ -487,6 +544,8 @@ class MainActivity : ComponentActivity() {
         rightEyeX = prefs.getFloat("right_x", 0f)
         leftEyeY = prefs.getFloat("left_y", 0f)
         rightEyeY = prefs.getFloat("right_y", 0f)
+        leftEyeScale = prefs.getFloat("left_scale", 1f)
+        rightEyeScale = prefs.getFloat("right_scale", 1f)
         lensDistortion = prefs.getFloat("distortion", 0f)
     }
 
@@ -513,6 +572,18 @@ class MainActivity : ComponentActivity() {
                 }
                 paint.color = Color.BLACK
                 canvas.drawPath(path, paint)
+            }
+            if (calibrationPattern) {
+                for (i in 0..1) {
+                    val cx = half * (i + 0.5f); val cy = height / 2f
+                    paint.color = 0xFFFFD54F.toInt(); paint.strokeWidth = 2f; paint.style = Paint.Style.STROKE
+                    canvas.drawCircle(cx, cy, min(half, height) * 0.16f, paint)
+                    canvas.drawLine(cx - 34f, cy, cx + 34f, cy, paint)
+                    canvas.drawLine(cx, cy - 34f, cx, cy + 34f, paint)
+                    paint.color = Color.WHITE; paint.style = Paint.Style.FILL; paint.textSize = 22f
+                    canvas.drawText(if (i == 0) "L" else "R", cx - 7f, cy - min(half, height) * 0.22f, paint)
+                }
+                paint.style = Paint.Style.FILL
             }
             if (grid) {
                 paint.color = 0x8877FF77.toInt()
