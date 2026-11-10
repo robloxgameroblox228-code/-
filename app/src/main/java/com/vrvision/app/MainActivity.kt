@@ -1,6 +1,7 @@
 package com.vrvision.app
 
 import android.app.AlertDialog
+import android.annotation.SuppressLint
 import android.content.Intent
 import android.graphics.Canvas
 import android.graphics.Color
@@ -22,7 +23,6 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.common.PlaybackException
-import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
@@ -178,8 +178,8 @@ class MainActivity : ComponentActivity() {
             isClickable = true
         }
         val eyes = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-        leftView = makePlayerView()
-        rightView = makePlayerView()
+        leftView = makePlayerView().apply { setOnClickListener { showControls() } }
+        rightView = makePlayerView().apply { setOnClickListener { showControls() } }
         eyes.addView(leftView, LinearLayout.LayoutParams(0, -1, 1f))
         eyes.addView(rightView, LinearLayout.LayoutParams(0, -1, 1f))
         stage.addView(eyes, FrameLayout.LayoutParams(-1, -1))
@@ -225,7 +225,7 @@ class MainActivity : ComponentActivity() {
         text = label
         textSize = 10f
         isAllCaps = false
-        setOnClickListener { action() }
+        setOnClickListener { showControls(); action() }
     }
 
     private fun ensurePlayers() {
@@ -312,13 +312,9 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    @OptIn(UnstableApi::class)
+    @SuppressLint("NewApi")
     private fun applyLensDistortion() {
-        if (Build.VERSION.SDK_INT < 33) {
-            leftView.videoSurfaceView?.setRenderEffect(null)
-            rightView.videoSurfaceView?.setRenderEffect(null)
-            return
-        }
+        if (Build.VERSION.SDK_INT < 33) return
         val source = """
             uniform shader content;
             uniform float2 resolution;
