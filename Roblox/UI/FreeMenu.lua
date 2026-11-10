@@ -643,7 +643,7 @@ local function refreshOwnEffects()
             p.Color = spec[3]
             p.Material = Enum.Material.SmoothPlastic
             p.CanCollide, p.CanTouch, p.CanQuery, p.Massless = false,false,false,true
-            p.CFrame = head.CFrame * CFrame.new(0,spec[2],0)
+            p.CFrame = head.CFrame * CFrame.new(0,spec[2],0) * CFrame.Angles(0,0,math.rad(90))
             p.Parent = character
             local weld = Instance.new("WeldConstraint")
             weld.Part0, weld.Part1, weld.Parent = head,p,p
@@ -859,6 +859,29 @@ local function buildSettings()
         content.Size=UDim2.new(1,v and -178 or -206,1,-92)
     end)
     addToggle("Плавные анимации","Включает или отключает анимации меню",function() return state.animations end,function(v) state.animations=v end)
+
+    local geometry = card(104)
+    textLabel(geometry,"Размер и прозрачность окна",UDim2.fromOffset(16,8),UDim2.new(1,-30,0,22),12,C.text,true)
+    textLabel(geometry,"Масштаб и прозрачность главного меню",UDim2.fromOffset(16,32),UDim2.new(1,-30,0,18),9,C.muted)
+    local scaleLabel = textLabel(geometry,string.format("%d%%",math.floor(state.scale*100)),UDim2.new(1,-170,0,60),UDim2.fromOffset(55,24),10,state.accent,true)
+    actionButton(geometry,"−",120,56,32,function()
+        state.scale=math.clamp(state.scale-0.05,0.75,1.2)
+        scaleLabel.Text=string.format("%d%%",math.floor(state.scale*100))
+        setWindowSize()
+    end,true)
+    actionButton(geometry,"+",16,56,32,function()
+        state.scale=math.clamp(state.scale+0.05,0.75,1.2)
+        scaleLabel.Text=string.format("%d%%",math.floor(state.scale*100))
+        setWindowSize()
+    end,true)
+    actionButton(geometry,"ПРОЗРАЧНОСТЬ −",350,56,112,function()
+        state.transparency=math.clamp(state.transparency-0.05,0,0.45)
+        window.BackgroundTransparency=state.transparency
+    end,true)
+    actionButton(geometry,"ПРОЗРАЧНОСТЬ +",225,56,112,function()
+        state.transparency=math.clamp(state.transparency+0.05,0,0.45)
+        window.BackgroundTransparency=state.transparency
+    end,true)
 
 end
 
