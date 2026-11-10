@@ -1,31 +1,29 @@
 # VR Vision
 
-Android video-player prototype for phone-based VR/cardboard viewers.
+An early Android VR video-player prototype for phone-based cardboard viewers.
 
-## Implemented in this prototype
-- Select a local video through Android's file picker
-- Playback through AndroidX Media3 / ExoPlayer
-- Built-in play, pause, seek and volume controls
-- Landscape orientation and immersive full-screen mode
-- Keep the display awake while the app is open
-- GitHub Actions debug-APK build
+## Current prototype features
+- Open local video files using Android's system picker
+- Open a direct HTTP/HTTPS video URL
+- Two synchronized eye players for side-by-side viewing
+- Mono mode duplicates the same video for both eyes
+- Playback and seek controls are provided in the player interface
+- Immersive landscape mode and keep-screen-awake
+- Image zoom and horizontal eye offset controls
+- Circular, oval and rounded-rectangle viewing masks
+- Calibration grid overlay
+- Save/load the current headset settings locally
 
-## Not implemented yet
-The SBS/Mono button is currently only a mode selector in the interface. True per-eye SBS cropping, mono duplication, lens-distortion correction, adjustable lens spacing/shape, calibration grid and saved headset profiles still need implementation and testing. This is an early prototype, not the finished feature-complete app.
+## Important limitations
+This is a prototype and has not yet been tested on a physical headset. Lens masks and basic image alignment are implemented, but a calibrated optical barrel/pincushion distortion shader, independent left/right eye geometry controls, robust multi-profile naming, YouTube playback, and broad network-stream compatibility are not implemented. SBS mode expects a side-by-side source video. Direct URL playback requires a direct media URL, not a normal YouTube page.
 
-## Build and download the APK
-1. Open the Actions page: https://github.com/robloxgameroblox228-code/-/actions
-2. Select **Build VR Vision APK**.
-3. Press **Run workflow**, keep branch **main**, and confirm.
-4. Wait until the run has a green check mark.
-5. Open that successful run and find **Artifacts** at the bottom.
-6. Download **VR-Vision-debug**. GitHub downloads it as a ZIP.
-7. Extract the ZIP on your phone. Inside is **app-debug.apk**.
-8. Tap the APK to install. If Android blocks it, allow your browser or file manager to install unknown apps, then retry.
+## Build APK
+1. Open the Actions tab.
+2. Select the latest Build VR Vision APK run on branch main.
+3. Wait for a green Success check.
+4. Open the run's Artifacts section and download VR-Vision-debug.
+5. Extract the ZIP and install app-debug.apk on Android.
 
-If the build fails, open the run, tap the failed job, and send a screenshot of the first red error section.
-
-## Technical details
-- Package: com.vrvision.app
-- Minimum Android version: Android 6.0 (API 23)
-- Debug build; not a signed Play Store release.
+Package: com.vrvision.app
+Minimum Android: 6.0 (API 23)
+Build type: debug APK.
