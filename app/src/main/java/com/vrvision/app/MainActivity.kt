@@ -224,12 +224,60 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun showProfiles() {
-        val names = arrayOf("Сохранить текущий профиль", "Загрузить профиль", "Сбросить настройки")
-        AlertDialog.Builder(this).setTitle("Профили VR-очков").setItems(names) { _, which ->
+        val actions = arrayOf("Сохранить новый профиль", "Загрузить профиль", "Удалить профиль", "Сбросить настройки")
+        AlertDialog.Builder(this).setTitle("Профили VR-очков").setItems(actions) { _, which ->
             when (which) {
-                0 -> { saveSettings(); Toast.makeText(this, "Профиль сохранён", Toast.LENGTH_SHORT).show() }
-                1 -> { loadSettings(); updateMode(); cycleMaskReset(); applyLayoutMode(); Toast.makeText(this, "Профиль загружен", Toast.LENGTH_SHORT).show() }
-                2 -> { sbs = false; zoom = 1f; eyeOffset = 0f; mask = 0; grid = false; updateMode(); cycleMaskReset(); applyLayoutMode(); saveSettings() }
+                0 -> {
+                    val input = EditText(this).apply { hint = "Например: Google Cardboard" }
+                    AlertDialog.Builder(this).setTitle("Название профиля").setView(input)
+                        .setNegativeButton("Отмена", null)
+                        .setPositiveButton("Сохранить") { _, _ ->
+                            val name = input.text.toString().trim()
+                            if (name.isBlank()) {
+                                Toast.makeText(this, "Введи название профиля", Toast.LENGTH_SHORT).show()
+                            } else {
+                                val key = "profile_" + name
+                                prefs.edit().putBoolean(key + "_sbs", sbs).putBoolean(key + "_grid", grid)
+                                    .putInt(key + "_mask", mask).putFloat(key + "_zoom", zoom)
+                                    .putFloat(key + "_offset", eyeOffset).putStringSet("profile_names",
+                                        (prefs.getStringSet("profile_names", emptySet()) ?: emptySet()) + name).apply()
+                                Toast.makeText(this, "Профиль «$name» сохранён", Toast.LENGTH_SHORT).show()
+                            }
+                        }.show()
+                }
+                1, 2 -> {
+                    val names = (prefs.getStringSet("profile_names", emptySet()) ?: emptySet()).toList().sorted()
+                    if (names.isEmpty()) {
+                        Toast.makeText(this, "Сначала сохрани профиль", Toast.LENGTH_SHORT).show()
+                    } else {
+                        AlertDialog.Builder(this).setTitle(if (which == 1) "Выбери профиль" else "Удалить профиль")
+                            .setItems(names.toTypedArray()) { _, index ->
+                                val name = names[index]
+                                val key = "profile_" + name
+                                if (which == 1) {
+                                    sbs = prefs.getBoolean(key + "_sbs", false)
+                                    grid = prefs.getBoolean(key + "_grid", false)
+                                    mask = prefs.getInt(key + "_mask", 0)
+                                    zoom = prefs.getFloat(key + "_zoom", 1f)
+                                    eyeOffset = prefs.getFloat(key + "_offset", 0f)
+                                    updateMode()
+                                    cycleMaskReset()
+                                    overlay.invalidate()
+                                    applyLayoutMode()
+                                    Toast.makeText(this, "Загружен профиль «$name»", Toast.LENGTH_SHORT).show()
+                                } else {
+                                    prefs.edit().remove(key + "_sbs").remove(key + "_grid").remove(key + "_mask")
+                                        .remove(key + "_zoom").remove(key + "_offset")
+                                        .putStringSet("profile_names", names.filter { it != name }.toSet()).apply()
+                                    Toast.makeText(this, "Профиль удалён", Toast.LENGTH_SHORT).show()
+                                }
+                            }.show()
+                    }
+                }
+                3 -> {
+                    sbs = false; zoom = 1f; eyeOffset = 0f; mask = 0; grid = false
+                    updateMode(); cycleMaskReset(); applyLayoutMode(); saveSettings()
+                }
             }
         }.show()
     }
