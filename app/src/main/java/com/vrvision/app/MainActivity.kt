@@ -34,6 +34,9 @@ class MainActivity : ComponentActivity() {
     private lateinit var leftView: PlayerView
     private lateinit var rightView: PlayerView
     private lateinit var stage: FrameLayout
+    private lateinit var controlsPanel: LinearLayout
+    private var controlsVisible = true
+    private val hideControlsTask = Runnable { hideControls() }
     private lateinit var status: TextView
     private lateinit var overlay: CalibrationOverlay
     private lateinit var modeButton: Button
@@ -80,6 +83,7 @@ class MainActivity : ComponentActivity() {
         applyLensDistortion()
         immersive()
         uiHandler.post(progressUpdater)
+        scheduleControlsHide()
     }
 
     private fun immersive() {
@@ -90,7 +94,12 @@ class MainActivity : ComponentActivity() {
     private fun buildUi() {
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setBackgroundColor(Color.rgb(10, 10, 14))
+            setBackgroundColor(Color.BLACK)
+            setPadding(0, 0, 0, 0)
+        }
+        controlsPanel = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setBackgroundColor(0xEE101016.toInt())
             setPadding(10, 6, 10, 6)
         }
         val header = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
@@ -98,21 +107,7 @@ class MainActivity : ComponentActivity() {
             LinearLayout.LayoutParams(0, -2, 1f))
         status = TextView(this).apply { text = "Выбери видео"; textSize = 12f; setTextColor(0xFFB8B8C4.toInt()) }
         header.addView(status)
-        root.addView(header)
-
-        stage = FrameLayout(this).apply {
-            setBackgroundColor(Color.BLACK)
-            layoutParams = LinearLayout.LayoutParams(-1, 0, 1f)
-        }
-        val eyes = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-        leftView = makePlayerView()
-        rightView = makePlayerView()
-        eyes.addView(leftView, LinearLayout.LayoutParams(0, -1, 1f))
-        eyes.addView(rightView, LinearLayout.LayoutParams(0, -1, 1f))
-        stage.addView(eyes, FrameLayout.LayoutParams(-1, -1))
-        overlay = CalibrationOverlay()
-        stage.addView(overlay, FrameLayout.LayoutParams(-1, -1))
-        root.addView(stage)
+        controlsPanel.addView(header)
 
         val timeline = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
         timeLabel = TextView(this).apply { text = "00:00 / 00:00"; textSize = 10f; setTextColor(Color.WHITE) }
@@ -122,11 +117,12 @@ class MainActivity : ComponentActivity() {
             setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
                 override fun onProgressChanged(bar: SeekBar?, value: Int, fromUser: Boolean) {
                     if (fromUser) {
+                        showControls()
                         val duration = leftPlayer?.duration ?: 0L
                         if (duration > 0) timeLabel.text = "${formatTime(duration * value / 1000)} / ${formatTime(duration)}"
                     }
                 }
-                override fun onStartTrackingTouch(bar: SeekBar?) { draggingSeek = true }
+                override fun onStartTrackingTouch(bar: SeekBar?) { draggingSeek = true; showControls() }
                 override fun onStopTrackingTouch(bar: SeekBar?) {
                     val duration = leftPlayer?.duration ?: 0L
                     if (duration > 0) {
@@ -135,27 +131,29 @@ class MainActivity : ComponentActivity() {
                         rightPlayer?.seekTo(target)
                     }
                     draggingSeek = false
+                    scheduleControlsHide()
                 }
             })
         }
         timeline.addView(seekBar, LinearLayout.LayoutParams(0, -2, 1f))
-        root.addView(timeline)
+        controlsPanel.addView(timeline)
 
         val volumeRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
         volumeRow.addView(TextView(this).apply { text = "Громкость"; textSize = 10f; setTextColor(Color.WHITE) })
         volumeRow.addView(SeekBar(this).apply {
             max = 100
-            progress = 100
+            progress = prefs.getInt("volume", 100)
             setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
                 override fun onProgressChanged(bar: SeekBar?, value: Int, fromUser: Boolean) {
                     leftPlayer?.volume = value / 100f
-                    rightPlayer?.volume = value / 100f
+                    prefs.edit().putInt("volume", value).apply()
+                    if (fromUser) showControls()
                 }
-                override fun onStartTrackingTouch(bar: SeekBar?) {}
-                override fun onStopTrackingTouch(bar: SeekBar?) {}
+                override fun onStartTrackingTouch(bar: SeekBar?) { showControls() }
+                override fun onStopTrackingTouch(bar: SeekBar?) { scheduleControlsHide() }
             })
         }, LinearLayout.LayoutParams(0, -2, 1f))
-        root.addView(volumeRow)
+        controlsPanel.addView(volumeRow)
 
         val row1 = LinearLayout(this).apply { gravity = Gravity.CENTER; orientation = LinearLayout.HORIZONTAL }
         row1.addView(makeButton("Открыть файл") { pickVideo.launch(arrayOf("video/*")) })
@@ -163,17 +161,51 @@ class MainActivity : ComponentActivity() {
         modeButton = makeButton("Mono") { sbs = !sbs; updateMode() }
         row1.addView(modeButton)
         row1.addView(makeButton("▶ / ⏸") { togglePlayback() })
-        root.addView(row1)
+        controlsPanel.addView(row1)
 
         val row2 = LinearLayout(this).apply { gravity = Gravity.CENTER; orientation = LinearLayout.HORIZONTAL }
         maskButton = makeButton("Маска: выкл.") { cycleMask() }
         row2.addView(maskButton)
-        row2.addView(makeButton("Сетка") { grid = !grid; overlay.invalidate() })
+        row2.addView(makeButton("Сетка") { grid = !grid; overlay.invalidate(); saveSettings() })
         row2.addView(makeButton("Настройки") { showSettings() })
         row2.addView(makeButton("Профили") { showProfiles() })
-        row2.addView(makeButton("Полный экран") { immersive() })
-        root.addView(row2)
+        controlsPanel.addView(row2)
+
+        stage = FrameLayout(this).apply {
+            setBackgroundColor(Color.BLACK)
+            layoutParams = LinearLayout.LayoutParams(-1, 0, 1f)
+            setOnClickListener { showControls() }
+            isClickable = true
+        }
+        val eyes = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        leftView = makePlayerView()
+        rightView = makePlayerView()
+        eyes.addView(leftView, LinearLayout.LayoutParams(0, -1, 1f))
+        eyes.addView(rightView, LinearLayout.LayoutParams(0, -1, 1f))
+        stage.addView(eyes, FrameLayout.LayoutParams(-1, -1))
+        overlay = CalibrationOverlay()
+        overlay.isClickable = false
+        stage.addView(overlay, FrameLayout.LayoutParams(-1, -1))
+        root.addView(controlsPanel, LinearLayout.LayoutParams(-1, -2))
+        root.addView(stage)
         setContentView(root)
+    }
+
+    private fun scheduleControlsHide() {
+        uiHandler.removeCallbacks(hideControlsTask)
+        if (controlsVisible) uiHandler.postDelayed(hideControlsTask, 5000)
+    }
+
+    private fun hideControls() {
+        if (!controlsVisible || isFinishing) return
+        controlsVisible = false
+        controlsPanel.visibility = View.GONE
+    }
+
+    private fun showControls() {
+        controlsVisible = true
+        controlsPanel.visibility = View.VISIBLE
+        scheduleControlsHide()
     }
 
     private fun formatTime(ms: Long): String {
@@ -199,7 +231,7 @@ class MainActivity : ComponentActivity() {
     private fun ensurePlayers() {
         if (leftPlayer != null) return
         leftPlayer = ExoPlayer.Builder(this).build().also { leftView.player = it }
-        rightPlayer = ExoPlayer.Builder(this).build().also { rightView.player = it }
+        rightPlayer = ExoPlayer.Builder(this).build().also { it.volume = 0f; rightView.player = it }
         leftPlayer?.addListener(object : Player.Listener {
             override fun onPlayerError(error: PlaybackException) {
                 status.text = "Ошибка видео: ${error.errorCodeName}"
@@ -472,6 +504,7 @@ class MainActivity : ComponentActivity() {
         leftView.player = null
         rightView.player = null
         uiHandler.removeCallbacks(progressUpdater)
+        uiHandler.removeCallbacks(hideControlsTask)
         leftPlayer?.release()
         rightPlayer?.release()
         leftPlayer = null
