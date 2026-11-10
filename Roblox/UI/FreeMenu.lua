@@ -31,7 +31,11 @@ local state = {
     compact = false,
     customBg = Color3.fromRGB(25, 27, 34),
     customPanel = Color3.fromRGB(34, 37, 46),
-    customText = Color3.fromRGB(242, 244, 250)
+    customText = Color3.fromRGB(242, 244, 250),
+    playerESP = false, playerChams = false, espStyle = "Контур",
+    espColor = Color3.fromRGB(100, 220, 255),
+    overheadHat = false, overheadTrail = false, overheadParticles = false,
+    particleStyle = "Звёзды", playerExpanded = false, ownExpanded = false
 }
 
 local palettes = {
@@ -186,14 +190,42 @@ local function topButton(caption, rightOffset, callback)
         ZIndex = 5
     }, top, "card")
     round(b, 9)
-    b.MouseButton1Click:Connect(callback)
-    b.MouseEnter:Connect(function() tween(b, {BackgroundColor3 = C.hover}, 0.1) end)
+    local locked = false
+    b.MouseButton1Click:Connect(function()
+        if locked then return end
+        locked = true
+        callback()
+        task.delay(0.22, function() locked = false end)
+    end)
+    b.MouseEnter:Connect(function() tween(b, {BackgroundColor3 = C.hover}, 0.1)
     b.MouseLeave:Connect(function() tween(b, {BackgroundColor3 = C.card}, 0.1) end)
     return b
 end
 
 local opened = false
 local maximized = false
+local transitioning = false
+local RunService = game:GetService("RunService")
+local oldMouseBehavior, oldMouseIcon
+local cursorLoop
+local function unlockCursor()
+    oldMouseBehavior = UserInputService.MouseBehavior
+    oldMouseIcon = UserInputService.MouseIconEnabled
+    UserInputService.MouseBehavior = Enum.MouseBehavior.Default
+    UserInputService.MouseIconEnabled = true
+    if cursorLoop then cursorLoop:Disconnect() end
+    cursorLoop = RunService.RenderStepped:Connect(function()
+        if opened and gui.Parent then
+            UserInputService.MouseBehavior = Enum.MouseBehavior.Default
+            UserInputService.MouseIconEnabled = true
+        end
+    end)
+end
+local function restoreCursor()
+    if cursorLoop then cursorLoop:Disconnect(); cursorLoop = nil end
+    if oldMouseBehavior then UserInputService.MouseBehavior = oldMouseBehavior end
+    if oldMouseIcon ~= nil then UserInputService.MouseIconEnabled = oldMouseIcon end
+end
 local baseSize = Vector2.new(760, 510)
 local function setWindowSize()
     if maximized then return end
@@ -205,7 +237,10 @@ local function setWindowSize()
 end
 
 local function closeMenu()
+    if transitioning or not opened then return end
+    transitioning = true
     opened = false
+    restoreCursor()
     tween(window, {Size = UDim2.fromOffset(24, 24), BackgroundTransparency = 1}, 0.16)
     tween(shadow, {BackgroundTransparency = 1}, 0.16)
     task.wait(state.animations and 0.17 or 0)
@@ -213,6 +248,7 @@ local function closeMenu()
     shadow.Visible = false
     window.BackgroundTransparency = state.transparency
     setWindowSize()
+    transitioning = false
 end
 
 topButton("□", -126, function()
@@ -369,7 +405,13 @@ local function actionButton(parentObj, caption, x, y, width, callback, secondary
         ZIndex = 8
     }, parentObj, secondary and "hover" or "accent")
     round(b, 9)
-    b.MouseButton1Click:Connect(callback)
+    local locked = false
+    b.MouseButton1Click:Connect(function()
+        if locked then return end
+        locked = true
+        callback()
+        task.delay(0.22, function() locked = false end)
+    end)
     b.MouseEnter:Connect(function()
         if not secondary then tween(b, {BackgroundColor3 = state.accent:Lerp(Color3.new(1,1,1), 0.12)}, 0.1) end
     end)
@@ -510,54 +552,192 @@ local function buildTest()
     end
 end
 
+local visualFolder = Instance.new("Folder")
+visualFolder.Name = "FreeMenuVisuals"
+visualFolder.Parent = gui
+local playerVisuals = {}
+local function clearPlayerVisual(target)
+    local objects = playerVisuals[target]
+    if objects then
+        for _, object in ipairs(objects) do if object and object.Parent then object:Destroy() end end
+    end
+    playerVisuals[target] = nil
+end
+local function updatePlayerVisual(target)
+    clearPlayerVisual(target)
+    if target == player or not (state.playerESP or state.playerChams) then return end
+    local character = target.Character
+    if not character then return end
+    local made = {}
+    playerVisuals[target] = made
+    if state.playerChams then
+        local h = Instance.new("Highlight")
+        h.Adornee = character
+        h.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+        h.FillColor = state.espColor
+        h.OutlineColor = state.espColor:Lerp(Color3.new(1,1,1),0.35)
+        h.FillTransparency = state.espStyle == "Заливка" and 0.25 or state.espStyle == "Контур" and 1 or 0.55
+        h.OutlineTransparency = state.espStyle == "Заливка" and 0.2 or 0
+        h.Parent = visualFolder
+        table.insert(made,h)
+    end
+    if state.playerESP then
+        local head = character:FindFirstChild("Head")
+        if head then
+            local bill = Instance.new("BillboardGui")
+            bill.Adornee = head
+            bill.Size = UDim2.fromOffset(150,30)
+            bill.StudsOffset = Vector3.new(0,2.7,0)
+            bill.AlwaysOnTop = true
+            bill.Parent = visualFolder
+            local text = Instance.new("TextLabel")
+            text.Size = UDim2.fromScale(1,1)
+            text.BackgroundColor3 = Color3.fromRGB(12,15,22)
+            text.BackgroundTransparency = 0.18
+            text.Text = target.DisplayName
+            text.TextColor3 = state.espColor
+            text.Font = Enum.Font.GothamBold
+            text.TextSize = 12
+            text.Parent = bill
+            local corner = Instance.new("UICorner")
+            corner.CornerRadius = UDim.new(0,8)
+            corner.Parent = text
+            table.insert(made,bill)
+        end
+    end
+end
+local function refreshPlayerVisuals()
+    for _, target in ipairs(Players:GetPlayers()) do
+        if target ~= player then updatePlayerVisual(target) end
+    end
+end
+Players.PlayerAdded:Connect(function(target)
+    target.CharacterAdded:Connect(function() task.wait(0.5); updatePlayerVisual(target) end)
+end)
+Players.PlayerRemoving:Connect(clearPlayerVisual)
+for _, target in ipairs(Players:GetPlayers()) do
+    if target ~= player then target.CharacterAdded:Connect(function() task.wait(0.5); updatePlayerVisual(target) end) end
+end
+
+local ownEffects = {}
+local function clearOwnEffects()
+    for _, obj in ipairs(ownEffects) do if obj and obj.Parent then obj:Destroy() end end
+    table.clear(ownEffects)
+end
+local function refreshOwnEffects()
+    clearOwnEffects()
+    local character = player.Character
+    if not character then return end
+    local head, root = character:FindFirstChild("Head"), character:FindFirstChild("HumanoidRootPart")
+    if state.overheadHat and head then
+        -- Layered brim gives a simple stylized conical East-Asian hat silhouette.
+        for i, spec in ipairs({
+            {Vector3.new(2.1,0.12,2.1),1.0,Color3.fromRGB(225,174,75)},
+            {Vector3.new(1.5,0.15,1.5),1.13,Color3.fromRGB(166,54,54)},
+            {Vector3.new(0.85,0.17,0.85),1.28,Color3.fromRGB(225,174,75)}
+        }) do
+            local p = Instance.new("Part")
+            p.Name = "FreeMenuHatLayer"..i
+            p.Shape = Enum.PartType.Cylinder
+            p.Size = spec[1]
+            p.Color = spec[3]
+            p.Material = Enum.Material.SmoothPlastic
+            p.CanCollide, p.CanTouch, p.CanQuery, p.Massless = false,false,false,true
+            p.CFrame = head.CFrame * CFrame.new(0,spec[2],0)
+            p.Parent = character
+            local weld = Instance.new("WeldConstraint")
+            weld.Part0, weld.Part1, weld.Parent = head,p,p
+            table.insert(ownEffects,p)
+        end
+    end
+    if state.overheadTrail and root then
+        local x = Instance.new("Attachment"); x.Position=Vector3.new(0,0.7,0.45); x.Parent=root
+        local y = Instance.new("Attachment"); y.Position=Vector3.new(0,-0.7,0.45); y.Parent=root
+        local trail = Instance.new("Trail")
+        trail.Attachment0,trail.Attachment1=x,y
+        trail.Lifetime=0.6
+        trail.Color=ColorSequence.new(state.espColor,state.accent)
+        trail.LightEmission=0.6
+        trail.Parent=root
+        table.insert(ownEffects,x); table.insert(ownEffects,y); table.insert(ownEffects,trail)
+    end
+    if state.overheadParticles and root then
+        local att=Instance.new("Attachment"); att.Position=Vector3.new(0,1.1,0); att.Parent=root
+        local em=Instance.new("ParticleEmitter")
+        em.Rate=14; em.Lifetime=NumberRange.new(0.7,1.4); em.Speed=NumberRange.new(1,2)
+        em.SpreadAngle=Vector2.new(180,180); em.LightEmission=0.55
+        em.Size=NumberSequence.new(0.2,0)
+        em.Color=ColorSequence.new(state.espColor,state.accent)
+        em.Texture=state.particleStyle=="Дым" and "rbxasset://textures/particles/smoke_main.dds"
+            or state.particleStyle=="Огонь" and "rbxasset://textures/particles/fire_main.dds"
+            or "rbxasset://textures/particles/sparkles_main.dds"
+        em.Parent=att
+        table.insert(ownEffects,att)
+    end
+end
+player.CharacterAdded:Connect(function() task.wait(0.8); refreshOwnEffects() end)
+
+local function sectionHeader(titleText, description, expanded, callback)
+    local f=card(74)
+    textLabel(f,titleText,UDim2.fromOffset(16,8),UDim2.new(1,-155,0,22),12,C.text,true)
+    textLabel(f,description,UDim2.fromOffset(16,34),UDim2.new(1,-155,0,20),9,C.muted)
+    actionButton(f,expanded and "СВЕРНУТЬ" or "РАЗВЕРНУТЬ",14,20,112,callback,true)
+end
+
 local function buildVisuals()
     clearPage()
-    local f = card(82)
-    textLabel(f, "Акцентный цвет", UDim2.fromOffset(16, 10), UDim2.new(1, -160, 0, 22), 12, C.text, true)
-    textLabel(f, "Цвет выделения кнопок и активных вкладок", UDim2.fromOffset(16, 37), UDim2.new(1, -160, 0, 20), 9, C.muted)
-    local choices = {
-        {"Синий", Color3.fromRGB(110,145,255)}, {"Фиолетовый", Color3.fromRGB(174,125,255)},
-        {"Бирюзовый", Color3.fromRGB(65,205,190)}, {"Зелёный", Color3.fromRGB(100,205,135)},
-        {"Оранжевый", Color3.fromRGB(255,160,85)}, {"Красный", Color3.fromRGB(240,95,110)},
-        {"Розовый", Color3.fromRGB(245,125,185)}
-    }
-    local row = make("Frame", {Position = UDim2.fromOffset(16, 63), Size = UDim2.new(1, -32, 0, 28), BackgroundTransparency = 1, ZIndex = 7}, f)
-    local layout = make("UIListLayout", {FillDirection = Enum.FillDirection.Horizontal, Padding = UDim.new(0, 8), SortOrder = Enum.SortOrder.LayoutOrder}, row)
-    for i, item in ipairs(choices) do
-        local dot = make("TextButton", {Size = UDim2.fromOffset(25,25), BackgroundColor3 = item[2], Text = "", AutoButtonColor = false, LayoutOrder = i, ZIndex = 8}, row)
-        round(dot, 13)
-        stroke(dot, C.line)
-        dot.MouseButton1Click:Connect(function()
-            state.accent = item[2]
-            applyTheme()
-            notify("Цвет применён", item[1])
-        end)
-    end
-    f.Size = UDim2.new(1, -5, 0, 102)
-
-    addToggle("Скругление элементов", "Мягкие углы у карточек и кнопок", function() return state.rounded end, function(v) state.rounded = v; applyTheme() end)
-    addToggle("Компактная боковая панель", "Уменьшает ширину навигации", function() return state.compact end, function(v)
-        state.compact = v
-        sidebar.Size = UDim2.new(0, v and 138 or 166, 1, -92)
-        content.Position = UDim2.fromOffset(v and 164 or 192, 78)
-        content.Size = UDim2.new(1, v and -178 or -206, 1, -92)
+    sectionHeader("Игроки","ESP, Chams и разные виды подсветки",state.playerExpanded,function()
+        state.playerExpanded=not state.playerExpanded
+        buildVisuals()
     end)
-    addToggle("Плавные анимации", "Включает или отключает переходы", function() return state.animations end, function(v) state.animations = v end)
-
-    local sizeCard = card(82)
-    textLabel(sizeCard, "Масштаб интерфейса", UDim2.fromOffset(16, 9), UDim2.new(1, -170, 0, 22), 12, C.text, true)
-    textLabel(sizeCard, "Измени общий размер окна", UDim2.fromOffset(16, 35), UDim2.new(1, -170, 0, 20), 9, C.muted)
-    local value = textLabel(sizeCard, string.format("%d%%", math.floor(state.scale * 100)), UDim2.new(1, -150, 0, 28), UDim2.fromOffset(58, 24), 11, state.accent, true)
-    actionButton(sizeCard, "−", 82, 24, 34, function()
-        state.scale = math.clamp(state.scale - 0.05, 0.75, 1.2)
-        value.Text = string.format("%d%%", math.floor(state.scale * 100))
-        setWindowSize()
-    end, true)
-    actionButton(sizeCard, "+", 16, 24, 34, function()
-        state.scale = math.clamp(state.scale + 0.05, 0.75, 1.2)
-        value.Text = string.format("%d%%", math.floor(state.scale * 100))
-        setWindowSize()
-    end, true)
+    if state.playerExpanded then
+        addToggle("ESP игроков","Имя над персонажами поверх объектов",function() return state.playerESP end,function(v)
+            state.playerESP=v; refreshPlayerVisuals()
+        end)
+        addToggle("Chams","Подсветка силуэта сквозь стены",function() return state.playerChams end,function(v)
+            state.playerChams=v; refreshPlayerVisuals()
+        end)
+        local styles={"Контур","Заливка","Комбинированный"}
+        local st=card(78)
+        textLabel(st,"Тип подсветки",UDim2.fromOffset(16,8),UDim2.new(1,-30,0,20),12,C.text,true)
+        actionButton(st,state.espStyle,14,36,150,function()
+            local i=table.find(styles,state.espStyle) or 1
+            state.espStyle=styles[i%#styles+1]
+            refreshPlayerVisuals()
+            buildVisuals()
+        end,true)
+        local colors={Color3.fromRGB(90,210,255),Color3.fromRGB(255,90,110),Color3.fromRGB(120,255,150),Color3.fromRGB(190,120,255),Color3.fromRGB(255,205,95)}
+        local cf=card(72)
+        textLabel(cf,"Цвет подсветки",UDim2.fromOffset(16,7),UDim2.new(1,-30,0,20),12,C.text,true)
+        for i,color in ipairs(colors) do
+            local dot=make("TextButton",{Position=UDim2.fromOffset(16+(i-1)*39,37),Size=UDim2.fromOffset(26,26),BackgroundColor3=color,Text="",AutoButtonColor=false,ZIndex=8},cf)
+            round(dot,13); stroke(dot,C.line)
+            dot.MouseButton1Click:Connect(function() state.espColor=color; refreshPlayerVisuals(); refreshOwnEffects() end)
+        end
+    end
+    sectionHeader("Надо мной","Шляпа, след и частицы вокруг твоего персонажа",state.ownExpanded,function()
+        state.ownExpanded=not state.ownExpanded
+        buildVisuals()
+    end)
+    if state.ownExpanded then
+        addToggle("Китайская шляпа","Декоративная шляпа над головой",function() return state.overheadHat end,function(v)
+            state.overheadHat=v; refreshOwnEffects()
+        end)
+        addToggle("След за мной","Цветной след при движении",function() return state.overheadTrail end,function(v)
+            state.overheadTrail=v; refreshOwnEffects()
+        end)
+        addToggle("Частицы","Эффект вокруг персонажа",function() return state.overheadParticles end,function(v)
+            state.overheadParticles=v; refreshOwnEffects()
+        end)
+        local pf=card(78)
+        textLabel(pf,"Вид частиц",UDim2.fromOffset(16,8),UDim2.new(1,-30,0,20),12,C.text,true)
+        actionButton(pf,state.particleStyle,14,36,130,function()
+            local kinds={"Звёзды","Дым","Огонь"}
+            local i=table.find(kinds,state.particleStyle) or 1
+            state.particleStyle=kinds[i%#kinds+1]
+            refreshOwnEffects(); buildVisuals()
+        end,true)
+    end
 end
 
 local function buildSettings()
@@ -667,6 +847,19 @@ local function buildSettings()
         notify("Готово", "Оформление сброшено")
         buildSettings()
     end)
+
+    addToggle("Скругление элементов","Мягкие углы у карточек и кнопок",function() return state.rounded end,function(v)
+        state.rounded=v
+        for _,o in ipairs(gui:GetDescendants()) do if o:IsA("UICorner") then o.CornerRadius=UDim.new(0,v and 12 or 3) end end
+    end)
+    addToggle("Компактная панель","Уменьшает ширину боковой панели",function() return state.compact end,function(v)
+        state.compact=v
+        sidebar.Size=UDim2.new(0,v and 138 or 166,1,-92)
+        content.Position=UDim2.fromOffset(v and 164 or 192,78)
+        content.Size=UDim2.new(1,v and -178 or -206,1,-92)
+    end)
+    addToggle("Плавные анимации","Включает или отключает анимации меню",function() return state.animations end,function(v) state.animations=v end)
+
 end
 
 local function showPage(name)
@@ -687,8 +880,10 @@ for name, b in pairs(tabButtons) do
 end
 
 local function openMenu()
-    if opened then return end
+    if transitioning or opened then return end
+    transitioning = true
     opened = true
+    unlockCursor()
     window.Visible = true
     shadow.Visible = true
     local targetSize = maximized and UDim2.new(1,-28,1,-28) or UDim2.fromOffset(baseSize.X*state.scale, baseSize.Y*state.scale)
@@ -698,6 +893,7 @@ local function openMenu()
     window.BackgroundTransparency = 1
     tween(window, {Size = targetSize, Position = targetPos, BackgroundTransparency = state.transparency}, 0.22)
     tween(shadow, {BackgroundTransparency = 0.72}, 0.22)
+    task.delay(state.animations and 0.24 or 0, function() transitioning = false end)
 end
 
 local draggingLauncher = false
@@ -759,6 +955,17 @@ scroll.InputChanged:Connect(function(input)
             scroll.CanvasPosition = Vector2.new(0, target)
         end
     end
+end)
+
+UserInputService.InputBegan:Connect(function(input, processed)
+    if not processed and input.KeyCode == Enum.KeyCode.Insert then
+        if opened then closeMenu() else openMenu() end
+    end
+end)
+gui.Destroying:Connect(function()
+    restoreCursor()
+    for target in pairs(playerVisuals) do clearPlayerVisual(target) end
+    clearOwnEffects()
 end)
 
 showPage("Тест")
