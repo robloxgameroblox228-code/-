@@ -88,13 +88,30 @@ local palettes = {
 local C = palettes.Dark
 
 local function tween(obj, props, time)
+    if not obj then return nil end
+
     if not state.animations then
-        for k, v in pairs(props) do obj[k] = v end
-        return
+        local ok, err = pcall(function()
+            for k, v in pairs(props) do obj[k] = v end
+        end)
+        if not ok then warn("[FREE MENU] Tween assignment failed: " .. tostring(err)) end
+        return nil
     end
-    local t = TweenService:Create(obj, TweenInfo.new(time or 0.18, Enum.EasingStyle.Quart, Enum.EasingDirection.Out), props)
-    t:Play()
-    return t
+
+    local ok, result = pcall(function()
+        local animation = TweenService:Create(
+            obj,
+            TweenInfo.new(time or 0.18, Enum.EasingStyle.Quart, Enum.EasingDirection.Out),
+            props
+        )
+        animation:Play()
+        return animation
+    end)
+    if not ok then
+        warn("[FREE MENU] Tween failed: " .. tostring(result))
+        return nil
+    end
+    return result
 end
 
 local function make(className, props, parentObj, role)
@@ -534,7 +551,12 @@ local function applyTheme()
         if role == "bg" then obj.BackgroundColor3 = C.bg
         elseif role == "panel" then obj.BackgroundColor3 = C.panel
         elseif role == "card" then obj.BackgroundColor3 = C.card
-        elseif role == "hover" then obj.BackgroundColor3 = C.hover
+        elseif role == "hover" then
+            obj.BackgroundColor3 = C.hover
+            if obj:IsA("TextBox") then
+                obj.TextColor3 = C.text
+                obj.PlaceholderColor3 = C.muted
+            end
         elseif role == "text" then obj.TextColor3 = C.text
         elseif role == "muted" then obj.TextColor3 = C.muted
         elseif role == "accent" then
@@ -614,9 +636,7 @@ local function buildTest()
     end
 end
 
-local visualFolder = Instance.new("Folder")
-visualFolder.Name = "FreeMenuVisuals"
-visualFolder.Parent = gui
+local visualGuiParent = player:FindFirstChildOfClass("PlayerGui") or parent
 local playerVisuals = {}
 local function clearPlayerVisual(target)
     local objects = playerVisuals[target]
@@ -640,7 +660,7 @@ local function updatePlayerVisual(target)
         h.OutlineColor = state.espColor:Lerp(Color3.new(1,1,1),0.35)
         h.FillTransparency = state.espStyle == "Заливка" and 0.25 or state.espStyle == "Контур" and 1 or 0.55
         h.OutlineTransparency = state.espStyle == "Заливка" and 0.2 or 0
-        h.Parent = visualFolder
+        h.Parent = character
         table.insert(made,h)
     end
     if state.playerESP then
@@ -651,7 +671,7 @@ local function updatePlayerVisual(target)
             bill.Size = UDim2.fromOffset(150,30)
             bill.StudsOffset = Vector3.new(0,2.7,0)
             bill.AlwaysOnTop = true
-            bill.Parent = visualFolder
+            bill.Parent = visualGuiParent
             local text = Instance.new("TextLabel")
             text.Size = UDim2.fromScale(1,1)
             text.BackgroundColor3 = Color3.fromRGB(12,15,22)
