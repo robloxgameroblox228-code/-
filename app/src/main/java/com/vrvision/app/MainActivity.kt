@@ -33,6 +33,8 @@ class MainActivity : ComponentActivity() {
     private var rightPlayer: ExoPlayer? = null
     private lateinit var leftView: PlayerView
     private lateinit var rightView: PlayerView
+    private lateinit var leftLens: LensViewport
+    private lateinit var rightLens: LensViewport
     private lateinit var stage: FrameLayout
     private lateinit var controlsPanel: LinearLayout
     private var controlsVisible = true
@@ -189,12 +191,15 @@ class MainActivity : ComponentActivity() {
             setOnClickListener { if (testScreenMode >= 0) nextTestScreen() else showControls() }
             isClickable = true
         }
-        val eyes = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        leftLens = LensViewport()
+        rightLens = LensViewport()
         leftView = makePlayerView().apply { setOnClickListener { showControls() } }
         rightView = makePlayerView().apply { setOnClickListener { showControls() } }
-        eyes.addView(leftView, LinearLayout.LayoutParams(0, -1, 1f))
-        eyes.addView(rightView, LinearLayout.LayoutParams(0, -1, 1f))
-        stage.addView(eyes, FrameLayout.LayoutParams(-1, -1))
+        leftLens.addView(leftView, FrameLayout.LayoutParams(-1, -1))
+        rightLens.addView(rightView, FrameLayout.LayoutParams(-1, -1))
+        stage.addView(leftLens)
+        stage.addView(rightLens)
+        stage.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ -> layoutEyeWindows() }
         overlay = CalibrationOverlay()
         overlay.isClickable = false
         stage.addView(overlay, FrameLayout.LayoutParams(-1, -1))
@@ -229,7 +234,7 @@ class MainActivity : ComponentActivity() {
     private fun makePlayerView(): PlayerView =
         (layoutInflater.inflate(R.layout.vr_player_view, null, false) as PlayerView).apply {
             useController = false
-            resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
+            resizeMode = AspectRatioFrameLayout.RESIZE_MODE_ZOOM
             setBackgroundColor(Color.BLACK)
         }
 
@@ -304,31 +309,38 @@ class MainActivity : ComponentActivity() {
         saveSettings()
     }
 
+    // YouTube VR-style twin square lens windows, positioned like the reference screenshot.
+    private fun layoutEyeWindows() {
+        if (!::stage.isInitialized || !::leftLens.isInitialized || !::rightLens.isInitialized) return
+        val w = stage.width.toFloat()
+        val h = stage.height.toFloat()
+        if (w <= 0f || h <= 0f) return
+        val size = min(w * 0.36f, h * 0.645f).toInt().coerceAtLeast(1)
+        val centerY = h * 0.427f
+        leftLens.layoutParams = (leftLens.layoutParams ?: FrameLayout.LayoutParams(size, size)).also {
+            it.width = size; it.height = size
+        }
+        rightLens.layoutParams = (rightLens.layoutParams ?: FrameLayout.LayoutParams(size, size)).also {
+            it.width = size; it.height = size
+        }
+        leftLens.x = w * 0.31f - size / 2f
+        rightLens.x = w * 0.69f - size / 2f
+        leftLens.y = centerY - size / 2f
+        rightLens.y = centerY - size / 2f
+    }
+
     private fun applyLayoutMode() {
+        layoutEyeWindows()
         leftView.post {
             val w = leftView.width.toFloat().coerceAtLeast(1f)
-            if (sbs) {
-                leftView.scaleX = 2f * zoom
-                rightView.scaleX = 2f * zoom
-                leftView.translationX = w * 0.5f + eyeOffset + leftEyeX
-                rightView.translationX = -w * 0.5f - eyeOffset + rightEyeX
-            } else {
-                leftView.scaleX = zoom
-                rightView.scaleX = zoom
-                leftView.translationX = eyeOffset + leftEyeX
-                rightView.translationX = -eyeOffset + rightEyeX
-            }
+            leftView.translationX = (if (sbs) w * 0.5f else 0f) + eyeOffset + leftEyeX
+            rightView.translationX = (if (sbs) -w * 0.5f else 0f) - eyeOffset + rightEyeX
             leftView.translationY = leftEyeY
             rightView.translationY = rightEyeY
+            leftView.scaleX = zoom * leftEyeScale * if (sbs) 2f else 1f
+            rightView.scaleX = zoom * rightEyeScale * if (sbs) 2f else 1f
             leftView.scaleY = zoom * leftEyeScale
             rightView.scaleY = zoom * rightEyeScale
-            if (sbs) {
-                leftView.scaleX = 2f * zoom * leftEyeScale
-                rightView.scaleX = 2f * zoom * rightEyeScale
-            } else {
-                leftView.scaleX = zoom * leftEyeScale
-                rightView.scaleX = zoom * rightEyeScale
-            }
             overlay.invalidate()
         }
     }
@@ -577,20 +589,45 @@ class MainActivity : ComponentActivity() {
         lensDistortion = prefs.getFloat("distortion", 0f)
     }
 
+    // Clip each eye to the curved, slightly tapered optical window used by YouTube VR.
+    private inner class LensViewport : FrameLayout(this@MainActivity) {
+        private val lensPath = Path()
+        private val pathPaint = Paint(Paint.ANTI_ALIAS_FLAG)
+
+        override fun dispatchDraw(canvas: Canvas) {
+            val w = width.toFloat()
+            val h = height.toFloat()
+            if (w <= 0f || h <= 0f) return
+            lensPath.reset()
+            lensPath.moveTo(w * 0.055f, h * 0.055f)
+            lensPath.cubicTo(w * 0.25f, -h * 0.015f, w * 0.75f, -h * 0.015f, w * 0.945f, h * 0.055f)
+            lensPath.cubicTo(w * 0.99f, h * 0.27f, w * 1.005f, h * 0.73f, w * 0.945f, h * 0.945f)
+            lensPath.cubicTo(w * 0.75f, h * 1.015f, w * 0.25f, h * 1.015f, w * 0.055f, h * 0.945f)
+            lensPath.cubicTo(w * 0.005f, h * 0.73f, w * 0.01f, h * 0.27f, w * 0.055f, h * 0.055f)
+            lensPath.close()
+            val save = canvas.save()
+            canvas.clipPath(lensPath)
+            super.dispatchDraw(canvas)
+            canvas.restoreToCount(save)
+        }
+    }
+
     inner class CalibrationOverlay : View(this) {
         private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
         override fun onDraw(canvas: Canvas) {
             super.onDraw(canvas)
             val half = width / 2f
+            val eyeUnit = min(width * 0.36f, height * 0.645f)
+            val eyeCenterY = height * 0.427f
             if (mask != 0) {
                 val path = Path().apply {
                     fillType = Path.FillType.EVEN_ODD
                     addRect(0f, 0f, width.toFloat(), height.toFloat(), Path.Direction.CW)
                     for (i in 0..1) {
-                        val cx = half * (i + 0.5f)
-                        val cy = height / 2f
-                        val rx = half * 0.43f
-                        val ry = height * 0.43f
+                        val cx = width * if (i == 0) 0.31f else 0.69f
+                        val cy = eyeCenterY
+                        val rx = eyeUnit * 0.49f
+                        val ry = eyeUnit * 0.49f
                         when (mask) {
                             1 -> addCircle(cx, cy, min(rx, ry), Path.Direction.CW)
                             2 -> addOval(cx-rx, cy-ry, cx+rx, cy+ry, Path.Direction.CW)
@@ -603,9 +640,9 @@ class MainActivity : ComponentActivity() {
             }
             if (testScreenMode >= 0) {
                 for (i in 0..1) {
-                    val cx = half * (i + 0.5f)
-                    val cy = height / 2f
-                    val unit = min(half, height.toFloat())
+                    val cx = width * if (i == 0) 0.31f else 0.69f
+                    val cy = eyeCenterY
+                    val unit = eyeUnit
                     paint.style = Paint.Style.STROKE
                     paint.color = Color.WHITE
                     paint.strokeWidth = 1.5f
@@ -677,13 +714,13 @@ class MainActivity : ComponentActivity() {
             }
             if (calibrationPattern) {
                 for (i in 0..1) {
-                    val cx = half * (i + 0.5f); val cy = height / 2f
+                    val cx = width * if (i == 0) 0.31f else 0.69f; val cy = eyeCenterY
                     paint.color = 0xFFFFD54F.toInt(); paint.strokeWidth = 2f; paint.style = Paint.Style.STROKE
-                    canvas.drawCircle(cx, cy, min(half, height.toFloat()) * 0.16f, paint)
+                    canvas.drawCircle(cx, cy, eyeUnit * 0.16f, paint)
                     canvas.drawLine(cx - 34f, cy, cx + 34f, cy, paint)
                     canvas.drawLine(cx, cy - 34f, cx, cy + 34f, paint)
                     paint.color = Color.WHITE; paint.style = Paint.Style.FILL; paint.textSize = 22f
-                    canvas.drawText(if (i == 0) "L" else "R", cx - 7f, cy - min(half, height.toFloat()) * 0.22f, paint)
+                    canvas.drawText(if (i == 0) "L" else "R", cx - 7f, cy - eyeUnit * 0.22f, paint)
                 }
                 paint.style = Paint.Style.FILL
             }
