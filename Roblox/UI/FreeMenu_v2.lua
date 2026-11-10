@@ -1,5 +1,5 @@
 -- FREE MENU v2.0 | reviewed and hardened UI build
--- Sections: Test, Visuals, Settings. No gameplay or vehicle functions.
+-- Sections: Test, Visuals, Movement, Settings. Character movement tools included.
 
 local Players = game:GetService("Players")
 local TweenService = game:GetService("TweenService")
@@ -62,7 +62,10 @@ local state = {
     playerESP = false, playerChams = false, espStyle = "Контур",
     espColor = Color3.fromRGB(100, 220, 255),
     overheadHat = false, overheadTrail = false, overheadParticles = false,
-    particleStyle = "Звёзды", playerExpanded = false, ownExpanded = false
+    particleStyle = "Звёзды", playerExpanded = false, ownExpanded = false,
+    speedEnabled = false, sprintEnabled = true, jumpEnabled = false,
+    walkSpeed = 16, sprintSpeed = 28, jumpPower = 50, jumpHeight = 7.2,
+    noclip = false, fly = false, flySpeed = 55
 }
 
 local palettes = {
@@ -394,7 +397,8 @@ local function createTab(name, y)
 end
 createTab("Тест", 12)
 createTab("Визуалы", 64)
-createTab("Настройки", 116)
+createTab("Movement", 116)
+createTab("Настройки", 168)
 
 local status = make("TextLabel", {
     BackgroundTransparency = 1,
@@ -804,6 +808,305 @@ connectExternal(player.CharacterAdded, function(character)
     end)
 end)
 
+-- Movement controller: restores original character properties when features are disabled.
+local movementOriginal = {}
+local noclipOriginal = {}
+local flyVelocity, flyGyro
+local flyCharacter
+local shiftHeld = false
+
+local function getMovementCharacter()
+    local character = player.Character
+    if not character then return nil, nil, nil end
+    return character, character:FindFirstChildOfClass("Humanoid"), character:FindFirstChild("HumanoidRootPart")
+end
+
+local function saveHumanoidDefaults(humanoid)
+    if not humanoid or movementOriginal[humanoid] then return end
+    movementOriginal[humanoid] = {
+        WalkSpeed = humanoid.WalkSpeed,
+        JumpPower = humanoid.JumpPower,
+        JumpHeight = humanoid.JumpHeight,
+        UseJumpPower = humanoid.UseJumpPower,
+    }
+end
+
+local function applyMovementStats()
+    local _, humanoid = getMovementCharacter()
+    if not humanoid then return end
+    saveHumanoidDefaults(humanoid)
+    local original = movementOriginal[humanoid]
+
+    local sprinting = state.sprintEnabled and shiftHeld
+    if state.speedEnabled or sprinting then
+        humanoid.WalkSpeed = sprinting and state.sprintSpeed or state.walkSpeed
+    else
+        humanoid.WalkSpeed = original.WalkSpeed
+    end
+
+    if state.jumpEnabled then
+        if humanoid.UseJumpPower then
+            humanoid.JumpPower = state.jumpPower
+        else
+            humanoid.JumpHeight = state.jumpHeight
+        end
+    else
+        humanoid.JumpPower = original.JumpPower
+        humanoid.JumpHeight = original.JumpHeight
+    end
+end
+
+local function restoreNoclip()
+    for part, original in pairs(noclipOriginal) do
+        if part and part.Parent then
+            pcall(function() part.CanCollide = original end)
+        end
+    end
+    table.clear(noclipOriginal)
+end
+
+local function setNoclip(enabled)
+    state.noclip = enabled
+    if not enabled then
+        restoreNoclip()
+        return
+    end
+    local character = player.Character
+    if not character then return end
+    for _, object in ipairs(character:GetDescendants()) do
+        if object:IsA("BasePart") then
+            if noclipOriginal[object] == nil then
+                noclipOriginal[object] = object.CanCollide
+            end
+            object.CanCollide = false
+        end
+    end
+end
+
+local function stopFly()
+    if flyVelocity then pcall(function() flyVelocity:Destroy() end); flyVelocity = nil end
+    if flyGyro then pcall(function() flyGyro:Destroy() end); flyGyro = nil end
+
+    local character, humanoid = getMovementCharacter()
+    if humanoid and flyCharacter == character then
+        local original = movementOriginal[humanoid]
+        if original then humanoid.AutoRotate = original.AutoRotate ~= false end
+        pcall(function() humanoid:ChangeState(Enum.HumanoidStateType.GettingUp) end)
+    end
+    flyCharacter = nil
+end
+
+local function startFly()
+    local character, humanoid, root = getMovementCharacter()
+    if not character or not humanoid or not root then
+        state.fly = false
+        notify("Полёт недоступен", "Персонаж ещё не загрузился")
+        return false
+    end
+
+    stopFly()
+    saveHumanoidDefaults(humanoid)
+    local original = movementOriginal[humanoid]
+    if original.AutoRotate == nil then original.AutoRotate = humanoid.AutoRotate end
+    humanoid.AutoRotate = false
+    flyCharacter = character
+
+    local velocity = Instance.new("BodyVelocity")
+    velocity.Name = "FreeMenuFlyVelocity"
+    velocity.MaxForce = Vector3.new(1000000, 1000000, 1000000)
+    velocity.P = 15000
+    velocity.Velocity = Vector3.zero
+    velocity.Parent = root
+
+    local gyro = Instance.new("BodyGyro")
+    gyro.Name = "FreeMenuFlyGyro"
+    gyro.MaxTorque = Vector3.new(1000000, 1000000, 1000000)
+    gyro.P = 45000
+    gyro.D = 900
+    gyro.CFrame = workspace.CurrentCamera and workspace.CurrentCamera.CFrame or root.CFrame
+    gyro.Parent = root
+
+    flyVelocity, flyGyro = velocity, gyro
+    return true
+end
+
+local function setFly(enabled)
+    if enabled then
+        state.fly = true
+        if not startFly() then state.fly = false end
+    else
+        state.fly = false
+        stopFly()
+    end
+end
+
+local function restoreMovement()
+    state.fly = false
+    state.noclip = false
+    shiftHeld = false
+    stopFly()
+    restoreNoclip()
+
+    for humanoid, original in pairs(movementOriginal) do
+        if humanoid and humanoid.Parent then
+            pcall(function()
+                humanoid.WalkSpeed = original.WalkSpeed
+                humanoid.JumpPower = original.JumpPower
+                humanoid.JumpHeight = original.JumpHeight
+                humanoid.UseJumpPower = original.UseJumpPower
+                if original.AutoRotate ~= nil then humanoid.AutoRotate = original.AutoRotate end
+            end)
+        end
+    end
+    table.clear(movementOriginal)
+end
+
+connectExternal(UserInputService.InputBegan, function(input, processed)
+    if input.KeyCode == Enum.KeyCode.LeftShift or input.KeyCode == Enum.KeyCode.RightShift then
+        shiftHeld = true
+        applyMovementStats()
+    end
+end)
+
+connectExternal(UserInputService.InputEnded, function(input)
+    if input.KeyCode == Enum.KeyCode.LeftShift or input.KeyCode == Enum.KeyCode.RightShift then
+        shiftHeld = false
+        applyMovementStats()
+    end
+end)
+
+connectExternal(RunService.Heartbeat, function()
+    if not gui.Parent then return end
+    if state.speedEnabled or (state.sprintEnabled and shiftHeld) or state.jumpEnabled then
+        applyMovementStats()
+    end
+
+    if state.noclip then
+        local character = player.Character
+        if character then
+            for _, object in ipairs(character:GetDescendants()) do
+                if object:IsA("BasePart") then
+                    if noclipOriginal[object] == nil then
+                        noclipOriginal[object] = object.CanCollide
+                    end
+                    object.CanCollide = false
+                end
+            end
+        end
+    end
+
+    if state.fly and flyVelocity and flyVelocity.Parent then
+        local camera = workspace.CurrentCamera
+        local character, humanoid, root = getMovementCharacter()
+        if not camera or not character or character ~= flyCharacter or not humanoid or not root then
+            setFly(false)
+            return
+        end
+
+        local direction = Vector3.zero
+        if UserInputService:IsKeyDown(Enum.KeyCode.W) then direction += camera.CFrame.LookVector end
+        if UserInputService:IsKeyDown(Enum.KeyCode.S) then direction -= camera.CFrame.LookVector end
+        if UserInputService:IsKeyDown(Enum.KeyCode.D) then direction += camera.CFrame.RightVector end
+        if UserInputService:IsKeyDown(Enum.KeyCode.A) then direction -= camera.CFrame.RightVector end
+        if UserInputService:IsKeyDown(Enum.KeyCode.Space) then direction += Vector3.yAxis end
+        if UserInputService:IsKeyDown(Enum.KeyCode.LeftControl) or UserInputService:IsKeyDown(Enum.KeyCode.C) then
+            direction -= Vector3.yAxis
+        end
+
+        if direction.Magnitude > 1 then direction = direction.Unit end
+        flyVelocity.Velocity = direction * state.flySpeed
+        flyGyro.CFrame = CFrame.lookAt(root.Position, root.Position + camera.CFrame.LookVector)
+    elseif state.fly then
+        setFly(false)
+    end
+end)
+
+connectExternal(player.CharacterRemoving, function()
+    stopFly()
+    restoreNoclip()
+end)
+
+connectExternal(player.CharacterAdded, function(character)
+    shiftHeld = false
+    task.delay(0.35, function()
+        if not gui.Parent or player.Character ~= character then return end
+        local humanoid = character:FindFirstChildOfClass("Humanoid")
+        if humanoid then
+            saveHumanoidDefaults(humanoid)
+            applyMovementStats()
+        end
+        if state.noclip then setNoclip(true) end
+        if state.fly then setFly(true) end
+    end)
+end)
+
+local function movementValueCard(titleText, description, getter, setter, step, minimum, maximum, suffix)
+    local f = card(82)
+    textLabel(f, titleText, UDim2.fromOffset(16, 8), UDim2.new(1, -165, 0, 22), 12, C.text, true)
+    textLabel(f, description, UDim2.fromOffset(16, 32), UDim2.new(1, -165, 0, 18), 9, C.muted)
+    local valueLabel = textLabel(f, tostring(getter()) .. (suffix or ""), UDim2.new(1, -155, 0, 25), UDim2.fromOffset(68, 28), 12, state.accent, true)
+    actionButton(f, "−", 112, 24, 34, function()
+        setter(math.clamp(getter() - step, minimum, maximum))
+        valueLabel.Text = tostring(getter()) .. (suffix or "")
+        applyMovementStats()
+        if state.fly and titleText == "Скорость полёта" then
+            -- Fly speed is read continuously by the movement loop.
+        end
+    end, true)
+    actionButton(f, "+", 16, 24, 34, function()
+        setter(math.clamp(getter() + step, minimum, maximum))
+        valueLabel.Text = tostring(getter()) .. (suffix or "")
+        applyMovementStats()
+    end, true)
+end
+
+local function buildMovement()
+    clearPage()
+
+    local intro = card(70)
+    textLabel(intro, "Управление персонажем", UDim2.fromOffset(16, 9), UDim2.new(1, -30, 0, 22), 12, C.text, true)
+    textLabel(intro, "Настройки применяются к твоему персонажу и обновляются после респавна", UDim2.fromOffset(16, 34), UDim2.new(1, -30, 0, 24), 9, C.muted)
+
+    movementValueCard("Обычная скорость", "Скорость ходьбы без Shift", function() return state.walkSpeed end, function(v) state.walkSpeed = v end, 2, 1, 200, "")
+    addToggle("Своя скорость", "Включить заданную обычную скорость", function() return state.speedEnabled end, function(v)
+        state.speedEnabled = v
+        applyMovementStats()
+    end)
+
+    movementValueCard("Скорость бега", "Скорость при удержании Shift", function() return state.sprintSpeed end, function(v) state.sprintSpeed = v end, 2, 1, 250, "")
+    addToggle("Бег на Shift", "Удерживай Shift для ускорения", function() return state.sprintEnabled end, function(v)
+        state.sprintEnabled = v
+        applyMovementStats()
+    end)
+
+    movementValueCard("Сила прыжка", "Значение JumpPower или JumpHeight — зависит от игры", function()
+        local _, humanoid = getMovementCharacter()
+        return humanoid and humanoid.UseJumpPower and state.jumpPower or state.jumpHeight
+    end, function(v)
+        local _, humanoid = getMovementCharacter()
+        if humanoid and humanoid.UseJumpPower then state.jumpPower = v else state.jumpHeight = v end
+    end, 5, 1, 200, "")
+    addToggle("Своя сила прыжка", "Включить заданную силу прыжка", function() return state.jumpEnabled end, function(v)
+        state.jumpEnabled = v
+        applyMovementStats()
+    end)
+
+    movementValueCard("Скорость полёта", "Измени скорость перемещения в режиме Fly", function() return state.flySpeed end, function(v) state.flySpeed = v end, 5, 10, 200, "")
+
+    addToggle("Noclip", "Проходить сквозь стены и объекты", function() return state.noclip end, function(v)
+        setNoclip(v)
+        notify("Noclip", v and "Включён" or "Выключен")
+    end)
+    addToggle("Fly", "WASD — движение, Space — вверх, Ctrl/C — вниз", function() return state.fly end, function(v)
+        setFly(v)
+        notify("Fly", state.fly and "Полёт включён" or "Полёт выключен")
+    end)
+
+    local info = card(72)
+    textLabel(info, "Управление Fly", UDim2.fromOffset(16, 8), UDim2.new(1, -30, 0, 20), 11, C.text, true)
+    textLabel(info, "W/A/S/D — направление камеры  •  Space — вверх  •  Left Ctrl или C — вниз. Shift отдельно включает бег, когда Fly выключен.", UDim2.fromOffset(16, 30), UDim2.new(1, -30, 0, 34), 9, C.muted)
+end
+
 local function sectionHeader(titleText, description, expanded, callback)
     local f=card(74)
     textLabel(f,titleText,UDim2.fromOffset(16,8),UDim2.new(1,-155,0,22),12,C.text,true)
@@ -1026,6 +1329,7 @@ local function showPage(name)
     scroll.CanvasPosition = Vector2.new(0, 0)
     if name == "Тест" then buildTest()
     elseif name == "Визуалы" then buildVisuals()
+    elseif name == "Movement" then buildMovement()
     else buildSettings() end
 end
 for name, b in pairs(tabButtons) do
@@ -1134,6 +1438,7 @@ local function cleanup()
         clearPlayerVisual(target)
     end
     clearOwnEffects()
+    restoreMovement()
 
     pcall(function()
         if sharedEnv.__FREE_MENU_CLEANUP == cleanup then
