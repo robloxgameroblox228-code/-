@@ -53,6 +53,7 @@ class MainActivity : ComponentActivity() {
     private var leftEyeScale = 1.0f
     private var rightEyeScale = 1.0f
     private var calibrationPattern = false
+    private var testScreenMode = -1 // -1 off, 0 sharpness, 1 alignment, 2 geometry
     private var lensDistortion = 0.0f
     private var distortionShader: RuntimeShader? = null
     private var currentUri: Uri? = null
@@ -179,12 +180,13 @@ class MainActivity : ComponentActivity() {
         controlsPanel.addView(row2)
         val row3 = LinearLayout(this).apply { gravity = Gravity.CENTER; orientation = LinearLayout.HORIZONTAL }
         row3.addView(makeButton("Калибровка") { showCalibration() })
+        row3.addView(makeButton("Тестовый экран") { startVisualTest() })
         controlsPanel.addView(row3)
 
         stage = FrameLayout(this).apply {
             setBackgroundColor(Color.BLACK)
             layoutParams = LinearLayout.LayoutParams(-1, 0, 1f)
-            setOnClickListener { showControls() }
+            setOnClickListener { if (testScreenMode >= 0) nextTestScreen() else showControls() }
             isClickable = true
         }
         val eyes = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
@@ -401,6 +403,32 @@ class MainActivity : ComponentActivity() {
         AlertDialog.Builder(this).setTitle("Настройки изображения").setView(ScrollView(this).apply { addView(panel) }).setPositiveButton("Готово", null).show()
     }
 
+    private fun startVisualTest() {
+        testScreenMode = 0
+        grid = false
+        calibrationPattern = false
+        overlay.invalidate()
+        hideControls()
+        status.text = "Тест чёткости — коснись экрана для следующего теста"
+        Toast.makeText(this, "Тест чёткости. Коснись экрана: совмещение → геометрия → выход", Toast.LENGTH_LONG).show()
+    }
+
+    private fun nextTestScreen() {
+        testScreenMode++
+        if (testScreenMode > 2) {
+            testScreenMode = -1
+            overlay.invalidate()
+            showControls()
+            status.text = "Тест завершён"
+            return
+        }
+        status.text = when (testScreenMode) {
+            1 -> "Тест совмещения — проверь центры и двоение"
+            else -> "Тест геометрии — проверь прямые линии и края"
+        }
+        overlay.invalidate()
+    }
+
     private fun showCalibration() {
         val previousGrid = grid
         val previousPattern = calibrationPattern
@@ -572,6 +600,80 @@ class MainActivity : ComponentActivity() {
                 }
                 paint.color = Color.BLACK
                 canvas.drawPath(path, paint)
+            }
+            if (testScreenMode >= 0) {
+                for (i in 0..1) {
+                    val cx = half * (i + 0.5f)
+                    val cy = height / 2f
+                    val unit = min(half, height)
+                    paint.style = Paint.Style.STROKE
+                    paint.color = Color.WHITE
+                    paint.strokeWidth = 1.5f
+                    if (testScreenMode == 0) {
+                        // Sharpness: progressively finer line pairs, rings, radial spokes and text.
+                        for (r in 1..5) canvas.drawCircle(cx, cy, unit * (0.07f + r * 0.055f), paint)
+                        for (n in 0 until 48) {
+                            val a = n * Math.PI / 24.0
+                            val inner = unit * 0.19f
+                            val outer = unit * 0.32f
+                            canvas.drawLine(
+                                cx + kotlin.math.cos(a).toFloat() * inner,
+                                cy + kotlin.math.sin(a).toFloat() * inner,
+                                cx + kotlin.math.cos(a).toFloat() * outer,
+                                cy + kotlin.math.sin(a).toFloat() * outer, paint
+                            )
+                        }
+                        for (n in 1..8) {
+                            val y = cy - unit * 0.34f + n * unit * 0.075f
+                            val gap = unit * (0.012f - n * 0.0011f).coerceAtLeast(0.003f)
+                            val length = unit * 0.28f
+                            var x = cx - length / 2f
+                            while (x < cx + length / 2f) {
+                                canvas.drawLine(x, y, (x + gap).coerceAtMost(cx + length / 2f), y, paint)
+                                x += gap * 2f
+                            }
+                        }
+                        paint.style = Paint.Style.FILL
+                        paint.color = Color.WHITE
+                        val sizes = floatArrayOf(30f, 24f, 19f, 15f, 12f, 9f)
+                        val labels = arrayOf("E  F  P", "3  8  5  0", "H  K  N  R", "C  D  O  S", "6  9  2  5", "N  V  Z  X")
+                        for (n in sizes.indices) {
+                            paint.textSize = sizes[n]
+                            canvas.drawText(labels[n], cx - unit * 0.23f, cy - unit * 0.38f + n * unit * 0.105f, paint)
+                        }
+                    } else if (testScreenMode == 1) {
+                        // Alignment: high-contrast targets and independent center references per eye.
+                        paint.strokeWidth = 2f
+                        canvas.drawCircle(cx, cy, unit * 0.24f, paint)
+                        canvas.drawCircle(cx, cy, unit * 0.12f, paint)
+                        canvas.drawLine(cx - unit * 0.34f, cy, cx + unit * 0.34f, cy, paint)
+                        canvas.drawLine(cx, cy - unit * 0.34f, cx, cy + unit * 0.34f, paint)
+                        canvas.drawLine(cx - unit * 0.24f, cy - unit * 0.24f, cx + unit * 0.24f, cy + unit * 0.24f, paint)
+                        canvas.drawLine(cx - unit * 0.24f, cy + unit * 0.24f, cx + unit * 0.24f, cy - unit * 0.24f, paint)
+                        paint.style = Paint.Style.FILL
+                        paint.color = 0xFFFFD54F.toInt()
+                        canvas.drawCircle(cx, cy, unit * 0.018f, paint)
+                        paint.textSize = 20f
+                        canvas.drawText(if (i == 0) "LEFT" else "RIGHT", cx - unit * 0.11f, cy - unit * 0.39f, paint)
+                    } else {
+                        // Geometry: grid, square frame, diagonals and edge reference points.
+                        paint.strokeWidth = 1.5f
+                        val radius = unit * 0.34f
+                        canvas.drawRect(cx - radius, cy - radius, cx + radius, cy + radius, paint)
+                        canvas.drawLine(cx - radius, cy - radius, cx + radius, cy + radius, paint)
+                        canvas.drawLine(cx - radius, cy + radius, cx + radius, cy - radius, paint)
+                        for (n in -4..4) {
+                            val p = n * radius / 4f
+                            canvas.drawLine(cx + p, cy - radius, cx + p, cy + radius, paint)
+                            canvas.drawLine(cx - radius, cy + p, cx + radius, cy + p, paint)
+                        }
+                        paint.style = Paint.Style.FILL
+                        paint.textSize = 18f
+                        canvas.drawText("TOP", cx - 18f, cy - radius - 10f, paint)
+                        canvas.drawText("BOTTOM", cx - 35f, cy + radius + 28f, paint)
+                    }
+                    paint.style = Paint.Style.FILL
+                }
             }
             if (calibrationPattern) {
                 for (i in 0..1) {
