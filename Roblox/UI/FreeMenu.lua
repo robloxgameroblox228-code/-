@@ -178,6 +178,7 @@ local function topButton(symbol, x, color, callback)
 end
 
 local maximized = false
+local opened = false
 local normalSize = UDim2.fromOffset(570, 390)
 local normalPos = UDim2.new(0.5, -285, 0.5, -195)
 
@@ -193,6 +194,7 @@ topButton("□", -112, C.accent, function()
 end)
 
 topButton("—", -72, C.text, function()
+    opened = false
     tween(window, 0.18, {Size = UDim2.fromOffset(30, 30), Position = UDim2.new(0, 36, 0.5, -15), BackgroundTransparency = 1})
     tween(shadow, 0.18, {BackgroundTransparency = 1})
     task.wait(0.19)
@@ -435,7 +437,6 @@ UserInputService.InputChanged:Connect(function(input)
     end
 end)
 
-local opened = false
 local function openMenu()
     if opened then
         opened = false
