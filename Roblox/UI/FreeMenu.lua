@@ -1,4 +1,4 @@
--- FREE MENU v1.0 | clean UI-only build
+-- FREE MENU v2.0 | reviewed and hardened UI build
 -- Sections: Test, Visuals, Settings. No gameplay or vehicle functions.
 
 local Players = game:GetService("Players")
@@ -6,19 +6,46 @@ local TweenService = game:GetService("TweenService")
 local UserInputService = game:GetService("UserInputService")
 local CoreGui = game:GetService("CoreGui")
 
+-- Keep one active copy and disconnect listeners from previous executions.
+local sharedEnv = _G
+pcall(function()
+    if type(getgenv) == "function" then sharedEnv = getgenv() end
+end)
+pcall(function()
+    local previousCleanup = sharedEnv.__FREE_MENU_CLEANUP
+    if type(previousCleanup) == "function" then previousCleanup() end
+end)
+
+local externalConnections = {}
+local function connectExternal(signal, callback)
+    local connection = signal:Connect(callback)
+    table.insert(externalConnections, connection)
+    return connection
+end
+
 local player = Players.LocalPlayer
+if not player then
+    warn("[FREE MENU] LocalPlayer is unavailable.")
+    return
+end
 local parent
 pcall(function() if gethui then parent = gethui() end end)
 if not parent then pcall(function() parent = CoreGui end) end
 if not parent then parent = player:WaitForChild("PlayerGui") end
 
-for _, container in ipairs({parent, CoreGui, player:FindFirstChildOfClass("PlayerGui")}) do
-    if container then
-        pcall(function()
-            local old = container:FindFirstChild("FreeMenuUI")
-            if old then old:Destroy() end
-        end)
-    end
+local cleanupContainers = {}
+local function addCleanupContainer(container)
+    if container then table.insert(cleanupContainers, container) end
+end
+addCleanupContainer(parent)
+addCleanupContainer(CoreGui)
+addCleanupContainer(player:FindFirstChildOfClass("PlayerGui"))
+
+for _, container in ipairs(cleanupContainers) do
+    pcall(function()
+        local old = container:FindFirstChild("FreeMenuUI")
+        if old then old:Destroy() end
+    end)
 end
 
 local state = {
@@ -136,6 +163,7 @@ local window = make("Frame", {
     ZIndex = 2
 }, gui, "bg")
 round(window, 18)
+local windowScale = make("UIScale", {Scale = 1}, window)
 stroke(window)
 
 local top = make("Frame", {
@@ -191,10 +219,11 @@ local function topButton(caption, rightOffset, callback)
     }, top, "card")
     round(b, 9)
     local locked = false
-    b.MouseButton1Click:Connect(function()
+    b.Activated:Connect(function()
         if locked then return end
         locked = true
-        callback()
+        local ok, err = pcall(callback)
+        if not ok then warn("[FREE MENU] Button action failed: " .. tostring(err)) end
         task.delay(0.22, function() locked = false end)
     end)
     b.MouseEnter:Connect(function() tween(b, {BackgroundColor3 = C.hover}, 0.1) end)
@@ -227,11 +256,34 @@ local function restoreCursor()
     if oldMouseIcon ~= nil then UserInputService.MouseIconEnabled = oldMouseIcon end
 end
 local baseSize = Vector2.new(760, 510)
+local function getDisplayScale()
+    local scale = state.scale
+    local camera = workspace.CurrentCamera
+    if camera then
+        local viewport = camera.ViewportSize
+        local fitX = math.max(0.45, (viewport.X - 28) / baseSize.X)
+        local fitY = math.max(0.45, (viewport.Y - 28) / baseSize.Y)
+        scale = math.min(scale, fitX, fitY)
+    end
+    return math.max(0.45, scale)
+end
+
 local function setWindowSize()
-    if maximized then return end
-    local w, h = baseSize.X * state.scale, baseSize.Y * state.scale
-    window.Size = UDim2.fromOffset(w, h)
-    window.Position = UDim2.new(0.5, -w / 2, 0.5, -h / 2)
+    if maximized then
+        windowScale.Scale = 1
+        window.Size = UDim2.new(1, -28, 1, -28)
+        window.Position = UDim2.fromOffset(14, 14)
+        shadow.Size = UDim2.new(1, -16, 1, -16)
+        shadow.Position = UDim2.fromOffset(8, 8)
+        return
+    end
+
+    local displayScale = getDisplayScale()
+    windowScale.Scale = displayScale
+    window.Size = UDim2.fromOffset(baseSize.X, baseSize.Y)
+    window.Position = UDim2.new(0.5, -baseSize.X / 2, 0.5, -baseSize.Y / 2)
+
+    local w, h = baseSize.X * displayScale, baseSize.Y * displayScale
     shadow.Size = UDim2.fromOffset(w + 24, h + 24)
     shadow.Position = UDim2.new(0.5, -(w + 24) / 2, 0.5, -(h + 24) / 2)
 end
@@ -254,6 +306,7 @@ end
 topButton("□", -126, function()
     maximized = not maximized
     if maximized then
+        windowScale.Scale = 1
         tween(window, {Size = UDim2.new(1, -28, 1, -28), Position = UDim2.fromOffset(14, 14)}, 0.2)
         tween(shadow, {Size = UDim2.new(1, -16, 1, -16), Position = UDim2.fromOffset(8, 8)}, 0.2)
     else
@@ -312,7 +365,7 @@ local status = make("TextLabel", {
     BackgroundTransparency = 1,
     Position = UDim2.new(0, 14, 1, -30),
     Size = UDim2.new(1, -28, 0, 16),
-    Text = "FREE BUILD  •  1.0",
+    Text = "FREE BUILD  •  2.0",
     Font = Enum.Font.Gotham,
     TextSize = 9,
     TextXAlignment = Enum.TextXAlignment.Left,
@@ -406,10 +459,11 @@ local function actionButton(parentObj, caption, x, y, width, callback, secondary
     }, parentObj, secondary and "hover" or "accent")
     round(b, 9)
     local locked = false
-    b.MouseButton1Click:Connect(function()
+    b.Activated:Connect(function()
         if locked then return end
         locked = true
-        callback()
+        local ok, err = pcall(callback)
+        if not ok then warn("[FREE MENU] Button action failed: " .. tostring(err)) end
         task.delay(0.22, function() locked = false end)
     end)
     b.MouseEnter:Connect(function()
@@ -472,7 +526,7 @@ local function applyTheme()
             hover = state.customPanel:Lerp(Color3.new(1,1,1), 0.12),
             line = state.customPanel:Lerp(Color3.new(1,1,1), 0.22),
             text = state.customText,
-            muted = state.customText:Lerp(C and C.bg or Color3.new(0,0,0), 0.42)
+            muted = state.customText:Lerp(state.customBg, 0.42)
         }
     end
     for _, obj in ipairs(gui:GetDescendants()) do
@@ -485,7 +539,9 @@ local function applyTheme()
         elseif role == "muted" then obj.TextColor3 = C.muted
         elseif role == "accent" then
             obj.BackgroundColor3 = state.accent
-            obj.TextColor3 = Color3.fromRGB(15,18,25)
+            if obj:IsA("TextButton") or obj:IsA("TextBox") or obj:IsA("TextLabel") then
+                obj.TextColor3 = Color3.fromRGB(15,18,25)
+            end
         elseif role == "tab" then
             obj.BackgroundColor3 = obj.Name == activePage and C.hover or C.panel
             obj.TextColor3 = obj.Name == activePage and state.accent or C.muted
@@ -611,12 +667,33 @@ local function refreshPlayerVisuals()
         if target ~= player then updatePlayerVisual(target) end
     end
 end
-Players.PlayerAdded:Connect(function(target)
-    target.CharacterAdded:Connect(function() task.wait(0.5); updatePlayerVisual(target) end)
+local function bindPlayer(target)
+    if target == player then return end
+
+    connectExternal(target.CharacterAdded, function(character)
+        task.delay(0.5, function()
+            if gui.Parent and target.Parent == Players and target.Character == character then
+                updatePlayerVisual(target)
+            end
+        end)
+    end)
+
+    if target.Character then
+        task.defer(function()
+            if gui.Parent and target.Parent == Players then
+                updatePlayerVisual(target)
+            end
+        end)
+    end
+end
+
+connectExternal(Players.PlayerAdded, bindPlayer)
+connectExternal(Players.PlayerRemoving, function(target)
+    clearPlayerVisual(target)
 end)
-Players.PlayerRemoving:Connect(clearPlayerVisual)
+
 for _, target in ipairs(Players:GetPlayers()) do
-    if target ~= player then target.CharacterAdded:Connect(function() task.wait(0.5); updatePlayerVisual(target) end) end
+    bindPlayer(target)
 end
 
 local ownEffects = {}
@@ -675,7 +752,13 @@ local function refreshOwnEffects()
         table.insert(ownEffects,att)
     end
 end
-player.CharacterAdded:Connect(function() task.wait(0.8); refreshOwnEffects() end)
+connectExternal(player.CharacterAdded, function(character)
+    task.delay(0.8, function()
+        if gui.Parent and player.Character == character then
+            refreshOwnEffects()
+        end
+    end)
+end)
 
 local function sectionHeader(titleText, description, expanded, callback)
     local f=card(74)
@@ -863,24 +946,31 @@ local function buildSettings()
     local geometry = card(104)
     textLabel(geometry,"Размер и прозрачность окна",UDim2.fromOffset(16,8),UDim2.new(1,-30,0,22),12,C.text,true)
     textLabel(geometry,"Масштаб и прозрачность главного меню",UDim2.fromOffset(16,32),UDim2.new(1,-30,0,18),9,C.muted)
-    local scaleLabel = textLabel(geometry,string.format("%d%%",math.floor(state.scale*100)),UDim2.new(1,-170,0,60),UDim2.fromOffset(55,24),10,state.accent,true)
+    local geometryInfo = textLabel(geometry,
+        string.format("Масштаб: %d%%  •  Прозрачность: %d%%", math.floor(state.scale*100), math.floor(state.transparency*100)),
+        UDim2.fromOffset(16, 60), UDim2.new(1, -330, 0, 24), 9, C.muted, false)
+    local scaleLabel = textLabel(geometry,string.format("%d%%",math.floor(state.scale*100)),UDim2.new(1,-255,0,60),UDim2.fromOffset(55,24),10,state.accent,true)
     actionButton(geometry,"−",120,56,32,function()
         state.scale=math.clamp(state.scale-0.05,0.75,1.2)
         scaleLabel.Text=string.format("%d%%",math.floor(state.scale*100))
+        geometryInfo.Text=string.format("Масштаб: %d%%  •  Прозрачность: %d%%", math.floor(state.scale*100), math.floor(state.transparency*100))
         setWindowSize()
     end,true)
     actionButton(geometry,"+",16,56,32,function()
         state.scale=math.clamp(state.scale+0.05,0.75,1.2)
         scaleLabel.Text=string.format("%d%%",math.floor(state.scale*100))
+        geometryInfo.Text=string.format("Масштаб: %d%%  •  Прозрачность: %d%%", math.floor(state.scale*100), math.floor(state.transparency*100))
         setWindowSize()
     end,true)
     actionButton(geometry,"ПРОЗРАЧНОСТЬ −",350,56,112,function()
         state.transparency=math.clamp(state.transparency-0.05,0,0.45)
         window.BackgroundTransparency=state.transparency
+        geometryInfo.Text=string.format("Масштаб: %d%%  •  Прозрачность: %d%%", math.floor(state.scale*100), math.floor(state.transparency*100))
     end,true)
     actionButton(geometry,"ПРОЗРАЧНОСТЬ +",225,56,112,function()
         state.transparency=math.clamp(state.transparency+0.05,0,0.45)
         window.BackgroundTransparency=state.transparency
+        geometryInfo.Text=string.format("Масштаб: %d%%  •  Прозрачность: %d%%", math.floor(state.scale*100), math.floor(state.transparency*100))
     end,true)
 
 end
@@ -909,10 +999,11 @@ local function openMenu()
     unlockCursor()
     window.Visible = true
     shadow.Visible = true
-    local targetSize = maximized and UDim2.new(1,-28,1,-28) or UDim2.fromOffset(baseSize.X*state.scale, baseSize.Y*state.scale)
-    local targetPos = maximized and UDim2.fromOffset(14,14) or UDim2.new(0.5,-baseSize.X*state.scale/2,0.5,-baseSize.Y*state.scale/2)
+    local targetSize = maximized and UDim2.new(1,-28,1,-28) or UDim2.fromOffset(baseSize.X, baseSize.Y)
+    local targetPos = maximized and UDim2.fromOffset(14,14) or UDim2.new(0.5,-baseSize.X/2,0.5,-baseSize.Y/2)
+    windowScale.Scale = maximized and 1 or getDisplayScale()
     window.Size = UDim2.fromOffset(28,28)
-    window.Position = UDim2.new(launcher.Position.X.Scale, launcher.Position.X.Offset, launcher.Position.Y.Scale, launcher.Position.Y.Offset)
+    window.Position = targetPos
     window.BackgroundTransparency = 1
     tween(window, {Size = targetSize, Position = targetPos, BackgroundTransparency = state.transparency}, 0.22)
     tween(shadow, {BackgroundTransparency = 0.72}, 0.22)
@@ -933,7 +1024,7 @@ launcher.InputBegan:Connect(function(input)
         end)
     end
 end)
-UserInputService.InputChanged:Connect(function(input)
+connectExternal(UserInputService.InputChanged, function(input)
     if draggingLauncher and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
         local delta = input.Position - launcherStart
         if math.abs(delta.X) + math.abs(delta.Y) > 5 then launcherMoved = true end
@@ -948,6 +1039,7 @@ end)
 local draggingWindow = false
 local dragStart, windowStart
 top.InputBegan:Connect(function(input)
+    if input.Position.X >= top.AbsolutePosition.X + top.AbsoluteSize.X - 170 then return end
     if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
         draggingWindow = true
         dragStart = input.Position
@@ -957,7 +1049,7 @@ top.InputBegan:Connect(function(input)
         end)
     end
 end)
-UserInputService.InputChanged:Connect(function(input)
+connectExternal(UserInputService.InputChanged, function(input)
     if draggingWindow and not maximized and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
         local d = input.Position - dragStart
         window.Position = UDim2.new(windowStart.X.Scale, windowStart.X.Offset + d.X, windowStart.Y.Scale, windowStart.Y.Offset + d.Y)
@@ -980,16 +1072,40 @@ scroll.InputChanged:Connect(function(input)
     end
 end)
 
-UserInputService.InputBegan:Connect(function(input, processed)
+connectExternal(UserInputService.InputBegan, function(input, processed)
     if not processed and input.KeyCode == Enum.KeyCode.Insert then
         if opened then closeMenu() else openMenu() end
     end
 end)
-gui.Destroying:Connect(function()
+local cleaned = false
+local function cleanup()
+    if cleaned then return end
+    cleaned = true
+
     restoreCursor()
-    for target in pairs(playerVisuals) do clearPlayerVisual(target) end
+
+    for _, connection in ipairs(externalConnections) do
+        pcall(function() connection:Disconnect() end)
+    end
+    table.clear(externalConnections)
+
+    for target in pairs(playerVisuals) do
+        clearPlayerVisual(target)
+    end
     clearOwnEffects()
+
+    pcall(function()
+        if sharedEnv.__FREE_MENU_CLEANUP == cleanup then
+            sharedEnv.__FREE_MENU_CLEANUP = nil
+        end
+    end)
+end
+
+pcall(function()
+    sharedEnv.__FREE_MENU_CLEANUP = cleanup
 end)
+
+gui.Destroying:Connect(cleanup)
 
 showPage("Тест")
 applyTheme()
