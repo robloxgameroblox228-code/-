@@ -197,7 +197,7 @@ local function topButton(caption, rightOffset, callback)
         callback()
         task.delay(0.22, function() locked = false end)
     end)
-    b.MouseEnter:Connect(function() tween(b, {BackgroundColor3 = C.hover}, 0.1)
+    b.MouseEnter:Connect(function() tween(b, {BackgroundColor3 = C.hover}, 0.1) end)
     b.MouseLeave:Connect(function() tween(b, {BackgroundColor3 = C.card}, 0.1) end)
     return b
 end
