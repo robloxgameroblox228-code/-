@@ -8,6 +8,8 @@ import android.graphics.Paint
 import android.graphics.Path
 import android.net.Uri
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.view.Gravity
 import android.view.View
 import android.view.WindowManager
@@ -37,6 +39,20 @@ class MainActivity : ComponentActivity() {
     private var zoom = 1.0f
     private var eyeOffset = 0.0f
     private var currentUri: Uri? = null
+    private lateinit var seekBar: SeekBar
+    private lateinit var timeLabel: TextView
+    private val uiHandler = Handler(Looper.getMainLooper())
+    private var draggingSeek = false
+    private val progressUpdater = object : Runnable {
+        override fun run() {
+            val player = leftPlayer
+            if (player != null && !draggingSeek && player.duration > 0) {
+                seekBar.progress = ((player.currentPosition * 1000L) / player.duration).toInt().coerceIn(0, 1000)
+                timeLabel.text = "${formatTime(player.currentPosition)} / ${formatTime(player.duration)}"
+            }
+            uiHandler.postDelayed(this, 500)
+        }
+    }
 
     private val prefs by lazy { getSharedPreferences("vrvision", MODE_PRIVATE) }
 
@@ -54,6 +70,7 @@ class MainActivity : ComponentActivity() {
         buildUi()
         applyLayoutMode()
         immersive()
+        uiHandler.post(progressUpdater)
     }
 
     private fun immersive() {
@@ -88,6 +105,49 @@ class MainActivity : ComponentActivity() {
         stage.addView(overlay, FrameLayout.LayoutParams(-1, -1))
         root.addView(stage)
 
+        val timeline = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+        timeLabel = TextView(this).apply { text = "00:00 / 00:00"; textSize = 10f; setTextColor(Color.WHITE) }
+        timeline.addView(timeLabel)
+        seekBar = SeekBar(this).apply {
+            max = 1000
+            setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+                override fun onProgressChanged(bar: SeekBar?, value: Int, fromUser: Boolean) {
+                    if (fromUser) {
+                        val duration = leftPlayer?.duration ?: 0L
+                        if (duration > 0) timeLabel.text = "${formatTime(duration * value / 1000)} / ${formatTime(duration)}"
+                    }
+                }
+                override fun onStartTrackingTouch(bar: SeekBar?) { draggingSeek = true }
+                override fun onStopTrackingTouch(bar: SeekBar?) {
+                    val duration = leftPlayer?.duration ?: 0L
+                    if (duration > 0) {
+                        val target = duration * (bar?.progress ?: 0) / 1000
+                        leftPlayer?.seekTo(target)
+                        rightPlayer?.seekTo(target)
+                    }
+                    draggingSeek = false
+                }
+            })
+        }
+        timeline.addView(seekBar, LinearLayout.LayoutParams(0, -2, 1f))
+        root.addView(timeline)
+
+        val volumeRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+        volumeRow.addView(TextView(this).apply { text = "Громкость"; textSize = 10f; setTextColor(Color.WHITE) })
+        volumeRow.addView(SeekBar(this).apply {
+            max = 100
+            progress = 100
+            setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+                override fun onProgressChanged(bar: SeekBar?, value: Int, fromUser: Boolean) {
+                    leftPlayer?.volume = value / 100f
+                    rightPlayer?.volume = value / 100f
+                }
+                override fun onStartTrackingTouch(bar: SeekBar?) {}
+                override fun onStopTrackingTouch(bar: SeekBar?) {}
+            })
+        }, LinearLayout.LayoutParams(0, -2, 1f))
+        root.addView(volumeRow)
+
         val row1 = LinearLayout(this).apply { gravity = Gravity.CENTER; orientation = LinearLayout.HORIZONTAL }
         row1.addView(makeButton("Открыть файл") { pickVideo.launch(arrayOf("video/*")) })
         row1.addView(makeButton("Ссылка") { askForUrl() })
@@ -105,6 +165,12 @@ class MainActivity : ComponentActivity() {
         row2.addView(makeButton("Полный экран") { immersive() })
         root.addView(row2)
         setContentView(root)
+    }
+
+    private fun formatTime(ms: Long): String {
+        if (ms < 0 || ms == androidx.media3.common.C.TIME_UNSET) return "--:--"
+        val total = ms / 1000
+        return "%02d:%02d".format(total / 60, total % 60)
     }
 
     private fun makePlayerView(): PlayerView = PlayerView(this).apply {
@@ -343,6 +409,7 @@ class MainActivity : ComponentActivity() {
     override fun onDestroy() {
         leftView.player = null
         rightView.player = null
+        uiHandler.removeCallbacks(progressUpdater)
         leftPlayer?.release()
         rightPlayer?.release()
         leftPlayer = null
