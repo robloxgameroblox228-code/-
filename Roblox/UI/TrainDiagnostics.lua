@@ -347,7 +347,7 @@ end)
 title.InputEnded:Connect(function(input)
     if input.UserInputType == Enum.UserInputType.MouseButton1 then dragging = false end
 end)
-UserInputService.InputChanged:Connect(function(input)
+local dragConnection = UserInputService.InputChanged:Connect(function(input)
     if dragging and input.UserInputType == Enum.UserInputType.MouseMovement then
         local delta = input.Position - dragStart
         frame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
@@ -359,6 +359,7 @@ local function cleanup()
     if cleaned then return end
     cleaned = true
     if active then stop() end
+    pcall(function() dragConnection:Disconnect() end)
     pcall(function() gui:Destroy() end)
     if env.__TRAIN_DIAG_CLEANUP == cleanup then env.__TRAIN_DIAG_CLEANUP = nil end
 end
