@@ -1532,7 +1532,9 @@ local function applyShaderColor()
         local amount = state.shaderHighlights / 100
         shaderBloomEffect.Intensity = amount * 1.5
         shaderBloomEffect.Size = 24 + amount * 32
-        shaderBloomEffect.Threshold = 1
+        -- A threshold of 1 catches only near-white pixels; lower it gradually
+        -- as the user increases Bloom so more bright regions can glow.
+        shaderBloomEffect.Threshold = 1 - amount * 0.85
     elseif shaderBloomEffect then
         pcall(function() shaderBloomEffect:Destroy() end)
         shaderBloomEffect = nil
@@ -1571,7 +1573,7 @@ local function buildShaders()
         makeStepButton("+", -44, step)
     end
 
-    addToggle("Глянцевые поверхности", "Повышает Reflectance, не заменяя материалы и текстуры", function() return state.shaderGloss end, function(v)
+    addToggle("Глянцевые поверхности", "Повышает отражение неба; результат зависит от материала, это не зеркало", function() return state.shaderGloss end, function(v)
         state.shaderGloss = v
         if v then state.shaderMatte = false end
         applyShaderMaterials()
