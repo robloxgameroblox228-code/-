@@ -1310,9 +1310,10 @@ local function buildVisuals()
         local cf=card(72)
         textLabel(cf,"Цвет подсветки",UDim2.fromOffset(16,7),UDim2.new(1,-30,0,20),12,C.text,true)
         for i,color in ipairs(colors) do
-            local dot=make("TextButton",{Position=UDim2.fromOffset(16+(i-1)*39,37),Size=UDim2.fromOffset(26,26),BackgroundColor3=color,Text="",AutoButtonColor=false,ZIndex=8},cf)
+            local selectedColor = color
+            local dot=make("TextButton",{Position=UDim2.fromOffset(16+(i-1)*39,37),Size=UDim2.fromOffset(26,26),BackgroundColor3=selectedColor,Text="",AutoButtonColor=false,ZIndex=8},cf)
             round(dot,13); stroke(dot,C.line)
-            dot.Activated:Connect(function() state.espColor=color; refreshPlayerVisuals(); refreshOwnEffects() end)
+            dot.Activated:Connect(function() state.espColor=selectedColor; refreshPlayerVisuals(); refreshOwnEffects() end)
         end
     end
     sectionHeader("Надо мной","Шляпа, след и частицы вокруг твоего персонажа",state.ownExpanded,function()
@@ -1347,6 +1348,9 @@ local shaderEffect
 local shaderBloomEffect
 local shaderParts = {}
 local shaderMaterialSession = false
+local shaderScanning = false
+local shaderMaterialToken = 0
+local shaderApplyToken = 0
 
 local function isCharacterPart(part)
     local ancestor = part.Parent
@@ -1388,6 +1392,11 @@ local function applyShaderPart(part)
 end
 
 local function restoreShaderMaterials()
+    -- Invalidate any background scan/re-apply jobs before restoring properties.
+    shaderMaterialToken += 1
+    shaderApplyToken += 1
+    shaderScanning = false
+
     for part, original in pairs(shaderParts) do
         if part and part.Parent and original.LastApplied ~= nil then
             pcall(function()
@@ -1403,6 +1412,26 @@ local function restoreShaderMaterials()
     shaderMaterialSession = false
 end
 
+local function scheduleShaderReapply()
+    shaderApplyToken += 1
+    local token = shaderApplyToken
+    task.spawn(function()
+        local parts = {}
+        for part in pairs(shaderParts) do
+            table.insert(parts, part)
+        end
+        for index, part in ipairs(parts) do
+            if token ~= shaderApplyToken or not (state.shaderGloss or state.shaderMatte) then
+                return
+            end
+            if part and part.Parent then
+                applyShaderPart(part)
+            end
+            if index % 180 == 0 then task.wait() end
+        end
+    end)
+end
+
 local function applyShaderMaterials()
     local active = state.shaderGloss or state.shaderMatte
     if not active then
@@ -1410,21 +1439,32 @@ local function applyShaderMaterials()
         return
     end
 
-    -- Scan the map once when the effect is first enabled; slider changes reuse
-    -- the baseline cache instead of repeatedly traversing the entire workspace.
+    -- Scan existing map parts asynchronously in small batches. A large map
+    -- should not freeze the UI when a visual toggle is enabled.
     if not shaderMaterialSession then
         shaderMaterialSession = true
-        for _, item in ipairs(workspace:GetDescendants()) do
-            if item:IsA("BasePart") then rememberShaderPart(item) end
-        end
-    end
-
-    for part in pairs(shaderParts) do
-        if not part or not part.Parent then
-            shaderParts[part] = nil
-        else
-            applyShaderPart(part)
-        end
+        shaderScanning = true
+        shaderMaterialToken += 1
+        local token = shaderMaterialToken
+        task.spawn(function()
+            local descendants = workspace:GetDescendants()
+            for index, item in ipairs(descendants) do
+                if token ~= shaderMaterialToken or not (state.shaderGloss or state.shaderMatte) then
+                    return
+                end
+                if item:IsA("BasePart") then
+                    applyShaderPart(item)
+                end
+                if index % 180 == 0 then task.wait() end
+            end
+            if token == shaderMaterialToken then
+                shaderScanning = false
+            end
+        end)
+    else
+        -- If a scan is in progress it keeps reading the current slider values;
+        -- this batch updates the parts already visited without cancelling it.
+        scheduleShaderReapply()
     end
 end
 
@@ -1556,6 +1596,7 @@ local function buildSettings()
     textLabel(f, "Выбери готовую тему или настрой собственную", UDim2.fromOffset(16, 35), UDim2.new(1, -30, 0, 18), 9, C.muted)
     local themes = {"Тёмная", "Светлая", "Своя"}
     for i, name in ipairs(themes) do
+        local themeIndex, themeName = i, name
         local b = make("TextButton", {
             Position = UDim2.fromOffset(16 + (i-1)*126, 62),
             Size = UDim2.fromOffset(116, 28),
@@ -1569,9 +1610,9 @@ local function buildSettings()
         }, f, "hover")
         round(b, 8)
         b.Activated:Connect(function()
-            state.theme = (i == 1 and "Dark") or (i == 2 and "Light") or "Custom"
+            state.theme = (themeIndex == 1 and "Dark") or (themeIndex == 2 and "Light") or "Custom"
             applyTheme()
-            notify("Тема изменена", name)
+            notify("Тема изменена", themeName)
             buildSettings()
         end)
     end
@@ -1614,12 +1655,13 @@ local function buildSettings()
             {key = "customText", hint = "Текст", x = 276}
         }
         for _, item in ipairs(fields) do
+            local fieldKey, fieldHint, fieldX = item.key, item.hint, item.x
             local box = make("TextBox", {
-                Position = UDim2.fromOffset(item.x, 60),
+                Position = UDim2.fromOffset(fieldX, 60),
                 Size = UDim2.fromOffset(116, 30),
                 BackgroundColor3 = C.hover,
-                Text = colorToHex(state[item.key]),
-                PlaceholderText = item.hint,
+                Text = colorToHex(state[fieldKey]),
+                PlaceholderText = fieldHint,
                 TextColor3 = C.text,
                 Font = Enum.Font.Gotham,
                 TextSize = 10,
@@ -1629,7 +1671,7 @@ local function buildSettings()
             round(box, 8)
             box.FocusLost:Connect(function()
                 local parsed = hexToColor(box.Text)
-                if parsed then state[item.key] = parsed; applyTheme() else notify("Неверный HEX", "Используй формат #RRGGBB") end
+                if parsed then state[fieldKey] = parsed; applyTheme() else notify("Неверный HEX", "Используй формат #RRGGBB") end
             end)
         end
     end
@@ -1714,8 +1756,9 @@ showPage = function(name)
     else buildSettings() end
 end
 for name, b in pairs(tabButtons) do
-    b.Name = name
-    b.Activated:Connect(function() showPage(name) end)
+    local tabName = name
+    b.Name = tabName
+    b.Activated:Connect(function() showPage(tabName) end)
 end
 
 local function openMenu()
