@@ -332,36 +332,19 @@ local maximized = false
 local transitioning = false
 local RunService = game:GetService("RunService")
 local oldMouseBehavior, oldMouseIcon
-local cursorLoop
 local function unlockCursor()
+    -- Capture the game's cursor state once. Never fight the camera every frame.
+    if oldMouseBehavior == nil then
+        pcall(function() oldMouseBehavior = UserInputService.MouseBehavior end)
+        pcall(function() oldMouseIcon = UserInputService.MouseIconEnabled end)
+    end
     pcall(function()
-        oldMouseBehavior = UserInputService.MouseBehavior
-        oldMouseIcon = UserInputService.MouseIconEnabled
         UserInputService.MouseBehavior = Enum.MouseBehavior.Default
         UserInputService.MouseIconEnabled = true
-    end)
-
-    if cursorLoop then
-        pcall(function() cursorLoop:Disconnect() end)
-        cursorLoop = nil
-    end
-
-    cursorLoop = RunService.RenderStepped:Connect(function()
-        if opened and gui.Parent then
-            pcall(function()
-                UserInputService.MouseBehavior = Enum.MouseBehavior.Default
-                UserInputService.MouseIconEnabled = true
-            end)
-        end
     end)
 end
 
 local function restoreCursor()
-    if cursorLoop then
-        pcall(function() cursorLoop:Disconnect() end)
-        cursorLoop = nil
-    end
-
     if oldMouseBehavior ~= nil then
         pcall(function() UserInputService.MouseBehavior = oldMouseBehavior end)
     end
@@ -371,6 +354,7 @@ local function restoreCursor()
     oldMouseBehavior = nil
     oldMouseIcon = nil
 end
+
 local baseSize = Vector2.new(820, 550)
 local function getDisplayScale()
     local scale = state.scale
@@ -569,7 +553,7 @@ local function actionButton(parentObj, caption, x, y, width, callback, secondary
     local b = make("TextButton", {
         AnchorPoint = Vector2.new(1, 0),
         Position = UDim2.new(1, -(x or 14), 0, y or 22),
-        Size = UDim2.fromOffset((width or 112) <= 40 and (width or 32) or 116, 34),
+        Size = UDim2.fromOffset(width or 116, 34),
         BackgroundColor3 = secondary and C.hover or state.accent,
         Text = caption,
         TextColor3 = secondary and C.text or Color3.fromRGB(15, 18, 25),
@@ -923,7 +907,7 @@ end)
 local movementOriginal = {}
 local noclipOriginal = {}
 local noclipDescAddedConnection
-local flyVelocity, flyGyro
+local flyVelocity, flyOrientation, flyAttachment
 local flyCharacter
 local shiftHeld = false
 
@@ -1009,7 +993,8 @@ end
 
 local function stopFly()
     if flyVelocity then pcall(function() flyVelocity:Destroy() end); flyVelocity = nil end
-    if flyGyro then pcall(function() flyGyro:Destroy() end); flyGyro = nil end
+    if flyOrientation then pcall(function() flyOrientation:Destroy() end); flyOrientation = nil end
+    if flyAttachment then pcall(function() flyAttachment:Destroy() end); flyAttachment = nil end
 
     local character, humanoid = getMovementCharacter()
     if humanoid and flyCharacter == character then
@@ -1017,8 +1002,6 @@ local function stopFly()
         if original and original.AutoRotate ~= nil then
             pcall(function() humanoid.AutoRotate = original.AutoRotate end)
         end
-        -- Do not force a Humanoid state or zero velocity here:
-        -- both can interrupt normal walking/jumping immediately after Fly.
     end
     flyCharacter = nil
 end
@@ -1038,22 +1021,33 @@ local function startFly()
     humanoid.AutoRotate = false
     flyCharacter = character
 
-    local velocity = Instance.new("BodyVelocity")
+    local attachment = Instance.new("Attachment")
+    attachment.Name = "FreeMenuFlyAttachment"
+    attachment.Parent = root
+
+    local velocity = Instance.new("LinearVelocity")
     velocity.Name = "FreeMenuFlyVelocity"
-    velocity.MaxForce = Vector3.new(1000000, 1000000, 1000000)
-    velocity.P = 15000
-    velocity.Velocity = Vector3.zero
+    velocity.Attachment0 = attachment
+    velocity.RelativeTo = Enum.ActuatorRelativeTo.World
+    velocity.VelocityConstraintMode = Enum.VelocityConstraintMode.Vector
+    velocity.VectorVelocity = Vector3.zero
+    velocity.ForceLimitsEnabled = true
+    velocity.ForceLimitMode = Enum.ForceLimitMode.Magnitude
+    velocity.MaxForce = 1000000
     velocity.Parent = root
 
-    local gyro = Instance.new("BodyGyro")
-    gyro.Name = "FreeMenuFlyGyro"
-    gyro.MaxTorque = Vector3.new(1000000, 1000000, 1000000)
-    gyro.P = 45000
-    gyro.D = 900
-    gyro.CFrame = workspace.CurrentCamera and workspace.CurrentCamera.CFrame or root.CFrame
-    gyro.Parent = root
+    local orientation = Instance.new("AlignOrientation")
+    orientation.Name = "FreeMenuFlyOrientation"
+    orientation.Mode = Enum.OrientationAlignmentMode.OneAttachment
+    orientation.Attachment0 = attachment
+    orientation.RigidityEnabled = false
+    orientation.Responsiveness = 22
+    orientation.MaxTorque = 1000000
+    orientation.MaxAngularVelocity = 25
+    orientation.CFrame = root.CFrame.Rotation
+    orientation.Parent = root
 
-    flyVelocity, flyGyro = velocity, gyro
+    flyAttachment, flyVelocity, flyOrientation = attachment, velocity, orientation
     return true
 end
 
@@ -1135,27 +1129,47 @@ connectExternal(RunService.Heartbeat, function()
     if state.fly and flyVelocity and flyVelocity.Parent then
         local camera = workspace.CurrentCamera
         local character, humanoid, root = getMovementCharacter()
-        if not camera or not character or character ~= flyCharacter or not humanoid or not root then
+        if not camera or not character or character ~= flyCharacter or not humanoid or not root
+            or not flyOrientation or not flyOrientation.Parent then
             setFly(false)
             return
         end
 
-        local direction = Vector3.zero
-        if not UserInputService:GetFocusedTextBox() then
+        -- While the menu or a text field is active, hold the character still.
+        -- GUI interaction must never be interpreted as flight input.
+        if opened or UserInputService:GetFocusedTextBox() then
+            flyVelocity.VectorVelocity = Vector3.zero
+        else
+            local direction = Vector3.zero
             if UserInputService:IsKeyDown(Enum.KeyCode.W) then direction += camera.CFrame.LookVector end
             if UserInputService:IsKeyDown(Enum.KeyCode.S) then direction -= camera.CFrame.LookVector end
-            if UserInputService:IsKeyDown(Enum.KeyCode.D) then direction += camera.CFrame.RightVector end
-            if UserInputService:IsKeyDown(Enum.KeyCode.A) then direction -= camera.CFrame.RightVector end
+
+            local cameraRight = camera.CFrame.RightVector
+            local flatRight = Vector3.new(cameraRight.X, 0, cameraRight.Z)
+            if flatRight.Magnitude > 0.001 then
+                flatRight = flatRight.Unit
+                if UserInputService:IsKeyDown(Enum.KeyCode.D) then direction += flatRight end
+                if UserInputService:IsKeyDown(Enum.KeyCode.A) then direction -= flatRight end
+            end
+
             if UserInputService:IsKeyDown(Enum.KeyCode.Space) then direction += Vector3.yAxis end
             if UserInputService:IsKeyDown(Enum.KeyCode.LeftControl) or UserInputService:IsKeyDown(Enum.KeyCode.C) then
                 direction -= Vector3.yAxis
             end
-        end
 
-        if direction.Magnitude > 1 then direction = direction.Unit end
-        flyVelocity.Velocity = direction * state.flySpeed
-        flyGyro.CFrame = camera.CFrame
+            if direction.Magnitude > 1 then direction = direction.Unit end
+            flyVelocity.VectorVelocity = direction * state.flySpeed
+
+            -- Keep only yaw on the character. Camera pitch/roll must not tilt the rig.
+            local look = camera.CFrame.LookVector
+            local flatLook = Vector3.new(look.X, 0, look.Z)
+            if flatLook.Magnitude > 0.001 then
+                flyOrientation.CFrame = CFrame.lookAt(Vector3.zero, flatLook.Unit, Vector3.yAxis)
+            end
+        end
     elseif state.fly then
+        setFly(false)
+    end    elseif state.fly then
         setFly(false)
     end
 end)
@@ -1327,81 +1341,48 @@ local function buildVisuals()
     end
 end
 
--- Local-only post-processing and material overrides for the shader page.
+-- Local visual controls. Roblox LocalScripts do not expose arbitrary GPU shaders,
+-- roughness maps, editable RGB curves, or independent shadow/highlight grading.
+-- This implementation only uses supported part reflectance and post-processing.
 local shaderEffect
-local shaderOriginalAmbient = Lighting.Ambient
-local shaderOriginalOutdoorAmbient = Lighting.OutdoorAmbient
-local shaderOriginalExposure = Lighting.ExposureCompensation
+local shaderBloomEffect
 local shaderParts = {}
+local shaderMaterialSession = false
+
 local function isCharacterPart(part)
-    for _, target in ipairs(Players:GetPlayers()) do
-        if target.Character and part:IsDescendantOf(target.Character) then return true end
+    local ancestor = part.Parent
+    while ancestor and ancestor ~= workspace do
+        if ancestor:IsA("Model") and ancestor:FindFirstChildOfClass("Humanoid") then
+            return true
+        end
+        ancestor = ancestor.Parent
     end
     return false
 end
 
 local function rememberShaderPart(part)
-    if not part:IsA("BasePart") or isCharacterPart(part) or shaderParts[part] then return end
+    if not part or not part:IsA("BasePart") or isCharacterPart(part) or shaderParts[part] then return end
     shaderParts[part] = {Material = part.Material, Reflectance = part.Reflectance}
 end
 
-local function applyShaderMaterials()
-    for part, original in pairs(shaderParts) do
-        if not part.Parent then
-            shaderParts[part] = nil
-        else
-            local gloss = state.shaderGloss and state.glossStrength / 100 or 0
-            local matte = state.shaderMatte and state.matteStrength / 100 or 0
-            if matte > 0 then
-                part.Material = Enum.Material.Plastic
-                part.Reflectance = original.Reflectance * (1 - matte) + gloss * 0.55 * (1 - matte)
-            elseif gloss > 0 then
-                part.Material = original.Material
-                part.Reflectance = math.clamp(original.Reflectance + gloss * 0.55, 0, 1)
-            else
-                part.Material = original.Material
-                part.Reflectance = original.Reflectance
-            end
-        end
-    end
-end
+local function applyShaderPart(part)
+    if not part or not part.Parent or not (state.shaderGloss or state.shaderMatte) then return end
+    rememberShaderPart(part)
+    local original = shaderParts[part]
+    if not original then return end
 
-for _, item in ipairs(workspace:GetDescendants()) do
-    if item:IsA("BasePart") then rememberShaderPart(item) end
-end
-connectExternal(workspace.DescendantAdded, function(item)
-    if item:IsA("BasePart") then
-        task.defer(function()
-            if item.Parent then rememberShaderPart(item); applyShaderMaterials() end
-        end)
+    -- Never replace the map's material or texture. Only change the supported
+    -- Reflectance property, which is not a physically based roughness control.
+    if state.shaderMatte then
+        part.Reflectance = math.clamp(original.Reflectance * (1 - state.matteStrength / 100), 0, 1)
+    else
+        part.Reflectance = math.clamp(original.Reflectance + (state.glossStrength / 100) * 0.55, 0, 1)
     end
-end)
-
-local function applyShaderColor()
-    if not shaderEffect or not shaderEffect.Parent then
-        shaderEffect = Instance.new("ColorCorrectionEffect")
-        shaderEffect.Name = "FreeMenu_LocalColorGrade"
-        shaderEffect.Parent = Lighting
-    end
-    local hue = (state.shaderHue % 360) / 360
-    local tint = Color3.fromHSV(hue, math.clamp(math.abs(state.shaderHue) / 720, 0, 0.22), 1)
-    shaderEffect.TintColor = tint
-    shaderEffect.Contrast = math.clamp(state.shaderContrast / 100 + state.shaderCurve / 200, -1, 1)
-    shaderEffect.Saturation = math.clamp(state.shaderSaturation / 100, -1, 1)
-    shaderEffect.Brightness = math.clamp(state.shaderBrightness / 100, -1, 1)
-    -- Roblox has no independent shadow/highlight grading or editable RGB curves;
-    -- these controls approximate them with ambient fill and exposure.
-    local shadow = state.shaderShadows / 100
-    local ambientTarget = shadow >= 0 and Color3.new(1,1,1) or Color3.new(0,0,0)
-    local ambientMix = math.abs(shadow) * 0.65
-    Lighting.Ambient = shaderOriginalAmbient:Lerp(ambientTarget, ambientMix)
-    Lighting.OutdoorAmbient = shaderOriginalOutdoorAmbient:Lerp(ambientTarget, ambientMix)
-    Lighting.ExposureCompensation = shaderOriginalExposure + state.shaderHighlights / 100
 end
 
 local function restoreShaderMaterials()
     for part, original in pairs(shaderParts) do
-        if part.Parent then
+        if part and part.Parent then
             pcall(function()
                 part.Material = original.Material
                 part.Reflectance = original.Reflectance
@@ -1409,9 +1390,85 @@ local function restoreShaderMaterials()
         end
     end
     table.clear(shaderParts)
+    shaderMaterialSession = false
 end
 
-local function buildShaders()
+local function applyShaderMaterials()
+    local active = state.shaderGloss or state.shaderMatte
+    if not active then
+        restoreShaderMaterials()
+        return
+    end
+
+    -- Scan the map once when the effect is first enabled; slider changes reuse
+    -- the baseline cache instead of repeatedly traversing the entire workspace.
+    if not shaderMaterialSession then
+        shaderMaterialSession = true
+        for _, item in ipairs(workspace:GetDescendants()) do
+            if item:IsA("BasePart") then rememberShaderPart(item) end
+        end
+    end
+
+    for part in pairs(shaderParts) do
+        if not part or not part.Parent then
+            shaderParts[part] = nil
+        else
+            applyShaderPart(part)
+        end
+    end
+end
+
+connectExternal(workspace.DescendantAdded, function(item)
+    if item:IsA("BasePart") and (state.shaderGloss or state.shaderMatte) then
+        task.defer(function()
+            if item.Parent then applyShaderPart(item) end
+        end)
+    end
+end)
+
+local function applyShaderColor()
+    local hasColorGrade = state.shaderContrast ~= 0 or state.shaderSaturation ~= 0
+        or state.shaderBrightness ~= 0 or state.shaderHue ~= 0
+        or state.shaderShadows ~= 0 or state.shaderCurve ~= 0
+
+    if hasColorGrade then
+        if not shaderEffect or not shaderEffect.Parent then
+            shaderEffect = Instance.new("ColorCorrectionEffect")
+            shaderEffect.Name = "FreeMenu_LocalColorGrade"
+            shaderEffect.Parent = Lighting
+        end
+
+        local hue = (state.shaderHue % 360) / 360
+        local tintStrength = math.clamp(math.abs(state.shaderHue) / 360, 0, 1) * 0.32
+        local tint = Color3.fromHSV(hue, tintStrength, 1)
+        shaderEffect.TintColor = tint
+        shaderEffect.Contrast = math.clamp(state.shaderContrast / 100 + state.shaderCurve / 200, -1, 1)
+        shaderEffect.Saturation = math.clamp(state.shaderSaturation / 100, -1, 1)
+        -- Shadow lift is only an approximation through overall brightness.
+        shaderEffect.Brightness = math.clamp(state.shaderBrightness / 100 + state.shaderShadows / 300, -1, 1)
+    elseif shaderEffect then
+        pcall(function() shaderEffect:Destroy() end)
+        shaderEffect = nil
+    end
+
+    -- Bloom affects bright pixels, but it is glow, not a reflection or shader.
+    if state.shaderHighlights > 0 then
+        if not shaderBloomEffect or not shaderBloomEffect.Parent then
+            shaderBloomEffect = Instance.new("BloomEffect")
+            shaderBloomEffect.Name = "FreeMenu_LocalBloom"
+            shaderBloomEffect.Parent = Lighting
+        end
+        local amount = state.shaderHighlights / 100
+        shaderBloomEffect.Intensity = amount * 1.5
+        shaderBloomEffect.Size = 24 + amount * 32
+        shaderBloomEffect.Threshold = 1
+    elseif shaderBloomEffect then
+        pcall(function() shaderBloomEffect:Destroy() end)
+        shaderBloomEffect = nil
+    end
+end
+
+local functionlocal function buildShaders()
     clearPage()
 
     local intro = card(88)
@@ -1443,23 +1500,27 @@ local function buildShaders()
         makeStepButton("+", -44, step)
     end
 
-    addToggle("Глянцевые поверхности", "Добавляет блеск материалам объектов карты", function() return state.shaderGloss end, function(v)
-        state.shaderGloss = v; applyShaderMaterials()
+    addToggle("Глянцевые поверхности", "Повышает Reflectance, не заменяя материалы и текстуры", function() return state.shaderGloss end, function(v)
+        state.shaderGloss = v
+        if v then state.shaderMatte = false end
+        applyShaderMaterials()
     end)
     addValueControl("Сила глянца", "Интенсивность отражающей поверхности", "glossStrength", 0, 100, 5, "%", applyShaderMaterials)
-    addToggle("Матовые поверхности", "Убирает блеск и приближает материалы к матовым", function() return state.shaderMatte end, function(v)
-        state.shaderMatte = v; applyShaderMaterials()
+    addToggle("Приглушить отражение", "Снижает уже существующий Reflectance; шероховатость текстур не меняется", function() return state.shaderMatte end, function(v)
+        state.shaderMatte = v
+        if v then state.shaderGloss = false end
+        applyShaderMaterials()
     end)
     addValueControl("Сила матовости", "Насколько сильно приглушается отражение", "matteStrength", 0, 100, 5, "%", applyShaderMaterials)
 
     local section = card(42)
-    textLabel(section, "ЦВЕТОКОРРЕКЦИЯ • HSL", UDim2.fromOffset(14, 8), UDim2.new(1, -28, 0, 24), 11, state.accent, true)
+    textLabel(section, "ЦВЕТОКОРРЕКЦИЯ И ПОСТОБРАБОТКА", UDim2.fromOffset(14, 8), UDim2.new(1, -28, 0, 24), 11, state.accent, true)
     addValueControl("Контрастность", "Общий контраст изображения", "shaderContrast", -100, 100, 5, "", applyShaderColor)
     addValueControl("Насыщенность", "Интенсивность цветов", "shaderSaturation", -100, 100, 5, "", applyShaderColor)
     addValueControl("Яркость", "Общее осветление или затемнение", "shaderBrightness", -100, 100, 5, "", applyShaderColor)
-    addValueControl("Оттенок H", "Сдвиг цветового тона", "shaderHue", 0, 360, 5, "°", applyShaderColor)
-    addValueControl("Тени", "Приближённая настройка заполнения тёмных зон", "shaderShadows", -100, 100, 5, "", applyShaderColor)
-    addValueControl("Света", "Экспозиция светлых и общих участков", "shaderHighlights", -100, 100, 5, "", applyShaderColor)
+    addValueControl("Цветовое тонирование", "Накладывает мягкий цветовой фильтр, а не вращает HSL каждого пикселя", "shaderHue", 0, 360, 5, "°", applyShaderColor)
+    addValueControl("Поднятие теней", "Приближение через общую яркость; независимой коррекции теней нет", "shaderShadows", -100, 100, 5, "", applyShaderColor)
+    addValueControl("Свечение бликов", "Bloom для ярких областей; это свечение, не отражение", "shaderHighlights", 0, 100, 5, "", applyShaderColor)
     addValueControl("Кривые", "Приближение RGB-кривой через контраст", "shaderCurve", -100, 100, 5, "", applyShaderColor)
 
     local reset = card(58)
@@ -1600,7 +1661,6 @@ local function buildSettings()
 
     local geometry = card(104)
     textLabel(geometry,"Размер и прозрачность окна",UDim2.fromOffset(16,8),UDim2.new(1,-30,0,22),12,C.text,true)
-    textLabel(geometry,"Масштаб и прозрачность главного меню",UDim2.fromOffset(16,32),UDim2.new(1,-30,0,18),9,C.muted)
     local geometryInfo = textLabel(geometry,
         string.format("Масштаб: %d%%  •  Прозрачность: %d%%", math.floor(state.scale*100), math.floor(state.transparency*100)),
         UDim2.fromOffset(16, 32), UDim2.new(1, -30, 0, 18), 9, C.muted, false)
@@ -1713,20 +1773,8 @@ connectExternal(UserInputService.InputChanged, function(input)
     end
 end)
 
-local scrollTween
-scroll.InputChanged:Connect(function(input)
-    if input.UserInputType == Enum.UserInputType.MouseWheel then
-        local maxY = math.max(0, scroll.AbsoluteCanvasSize.Y - scroll.AbsoluteSize.Y)
-        local target = math.clamp(scroll.CanvasPosition.Y - input.Position.Z * 72, 0, maxY)
-        if scrollTween then scrollTween:Cancel() end
-        if state.animations then
-            scrollTween = TweenService:Create(scroll, TweenInfo.new(0.2, Enum.EasingStyle.Quart, Enum.EasingDirection.Out), {CanvasPosition = Vector2.new(0, target)})
-            scrollTween:Play()
-        else
-            scroll.CanvasPosition = Vector2.new(0, target)
-        end
-    end
-end)
+-- ScrollingFrame already handles mouse-wheel input natively. Avoid a second
+-- wheel handler that competes with the built-in scroll behavior.
 
 local emergencyStop -- forward declaration: the End-key callback is created before the function body
 connectExternal(UserInputService.InputBegan, function(input, processed)
@@ -1759,7 +1807,19 @@ emergencyStop = function()
     state.overheadParticles = false
     clearOwnEffects()
 
-    notify("Аварийная остановка", "Движение и эффекты отключены")
+    state.shaderGloss = false
+    state.shaderMatte = false
+    state.shaderContrast = 0
+    state.shaderSaturation = 0
+    state.shaderBrightness = 0
+    state.shaderHue = 0
+    state.shaderShadows = 0
+    state.shaderHighlights = 0
+    state.shaderCurve = 0
+    restoreShaderMaterials()
+    applyShaderColor()
+
+    notify("Аварийная остановка", "Движение, визуалы и фильтры отключены")
 end
 
 local cleaned = false
@@ -1781,11 +1841,7 @@ local function cleanup()
     restoreMovement()
     restoreShaderMaterials()
     if shaderEffect then pcall(function() shaderEffect:Destroy() end); shaderEffect = nil end
-    pcall(function()
-        Lighting.Ambient = shaderOriginalAmbient
-        Lighting.OutdoorAmbient = shaderOriginalOutdoorAmbient
-        Lighting.ExposureCompensation = shaderOriginalExposure
-    end)
+    if shaderBloomEffect then pcall(function() shaderBloomEffect:Destroy() end); shaderBloomEffect = nil end
 
     pcall(function()
         if sharedEnv.__FREE_MENU_CLEANUP == cleanup then
