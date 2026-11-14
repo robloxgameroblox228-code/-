@@ -469,8 +469,9 @@ local function createTab(name, y)
 end
 createTab("Главная", 12)
 createTab("Визуалы", 64)
-createTab("Движение", 116)
-createTab("Настройки", 168)
+createTab("Шейдеры", 116)
+createTab("Движение", 168)
+createTab("Настройки", 220)
 
 local status = make("TextLabel", {
     BackgroundTransparency = 1,
@@ -1300,6 +1301,18 @@ local function buildVisuals()
     end
 end
 
+local function buildShaders()
+    clearPage()
+
+    local intro = card(86)
+    textLabel(intro, "ШЕЙДЕРЫ И ГРАФИКА", UDim2.fromOffset(16, 10), UDim2.new(1, -30, 0, 22), 12, C.text, true)
+    textLabel(intro, "Отдельный раздел для визуальных фильтров и настроек освещения.", UDim2.fromOffset(16, 38), UDim2.new(1, -30, 0, 34), 9, C.muted)
+
+    local placeholder = card(112)
+    textLabel(placeholder, "РАЗДЕЛ ПОДГОТОВЛЕН", UDim2.fromOffset(16, 13), UDim2.new(1, -30, 0, 22), 12, state.accent, true)
+    textLabel(placeholder, "Пока здесь нет переключателей — добавим нужные шейдеры и эффекты по твоим следующим указаниям.", UDim2.fromOffset(16, 43), UDim2.new(1, -32, 0, 52), 10, C.muted)
+end
+
 local function buildSettings()
     clearPage()
     local f = card(100)
@@ -1455,6 +1468,7 @@ showPage = function(name)
     pageDesc.Text = name == "Главная" and "Центр управления игровыми функциями"
         or name == "Визуалы" and "Подсветка игроков и эффекты персонажа"
         or name == "Движение" and "Скорость, прыжки, полёт и noclip"
+        or name == "Шейдеры" and "Графические эффекты и визуальные фильтры"
         or "Внешний вид и параметры интерфейса"
     applyTheme()
     scroll.CanvasPosition = Vector2.new(0, 0)
