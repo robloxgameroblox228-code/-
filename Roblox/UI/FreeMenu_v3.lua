@@ -965,8 +965,13 @@ local function restoreNoclip()
     end
 
     for part, original in pairs(noclipOriginal) do
-        if part and part.Parent then
-            pcall(function() part.CanCollide = original end)
+        if part and part.Parent and type(original) == "table" then
+            pcall(function()
+                -- Restore only when CanCollide still has the value applied here.
+                if original.LastApplied ~= nil and part.CanCollide == original.LastApplied then
+                    part.CanCollide = original.CanCollide
+                end
+            end)
         end
     end
     table.clear(noclipOriginal)
@@ -974,10 +979,17 @@ end
 
 local function applyNoclipToPart(object)
     if not state.noclip or not object or not object:IsA("BasePart") then return end
-    if noclipOriginal[object] == nil then
-        noclipOriginal[object] = object.CanCollide
+    local original = noclipOriginal[object]
+    if original == nil then
+        original = {CanCollide = object.CanCollide, LastApplied = nil}
+        noclipOriginal[object] = original
+    elseif original.LastApplied ~= nil and object.CanCollide ~= original.LastApplied then
+        -- A game script changed collision while Noclip was active; remember
+        -- that newer value so disabling this feature does not overwrite it.
+        original.CanCollide = object.CanCollide
     end
     object.CanCollide = false
+    original.LastApplied = false
 end
 
 local function setNoclip(enabled)
@@ -1869,6 +1881,7 @@ emergencyStop = function()
     restoreShaderMaterials()
     applyShaderColor()
 
+    if showPage then showPage(activePage) end
     notify("Аварийная остановка", "Движение, визуалы и фильтры отключены")
 end
 
