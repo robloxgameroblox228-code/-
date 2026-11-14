@@ -368,6 +368,8 @@ local function restoreCursor()
     if oldMouseIcon ~= nil then
         pcall(function() UserInputService.MouseIconEnabled = oldMouseIcon end)
     end
+    oldMouseBehavior = nil
+    oldMouseIcon = nil
 end
 local baseSize = Vector2.new(820, 550)
 local function getDisplayScale()
@@ -938,6 +940,8 @@ local function saveHumanoidDefaults(humanoid)
         JumpPower = humanoid.JumpPower,
         JumpHeight = humanoid.JumpHeight,
         UseJumpPower = humanoid.UseJumpPower,
+        AutoRotate = humanoid.AutoRotate,
+        PlatformStand = humanoid.PlatformStand,
     }
 end
 
@@ -1007,15 +1011,14 @@ local function stopFly()
     if flyVelocity then pcall(function() flyVelocity:Destroy() end); flyVelocity = nil end
     if flyGyro then pcall(function() flyGyro:Destroy() end); flyGyro = nil end
 
-    local character, humanoid, root = getMovementCharacter()
-    if root and flyCharacter == character then
-        -- Remove leftover momentum when Fly is switched off.
-        pcall(function() root.AssemblyLinearVelocity = Vector3.zero end)
-    end
+    local character, humanoid = getMovementCharacter()
     if humanoid and flyCharacter == character then
         local original = movementOriginal[humanoid]
-        if original then humanoid.AutoRotate = original.AutoRotate ~= false end
-        pcall(function() humanoid:ChangeState(Enum.HumanoidStateType.GettingUp) end)
+        if original and original.AutoRotate ~= nil then
+            pcall(function() humanoid.AutoRotate = original.AutoRotate end)
+        end
+        -- Do not force a Humanoid state or zero velocity here:
+        -- both can interrupt normal walking/jumping immediately after Fly.
     end
     flyCharacter = nil
 end
@@ -1079,6 +1082,7 @@ local function restoreMovement()
                 humanoid.JumpHeight = original.JumpHeight
                 humanoid.UseJumpPower = original.UseJumpPower
                 if original.AutoRotate ~= nil then humanoid.AutoRotate = original.AutoRotate end
+                if original.PlatformStand ~= nil then humanoid.PlatformStand = original.PlatformStand end
             end)
         end
     end
@@ -1156,9 +1160,25 @@ connectExternal(RunService.Heartbeat, function()
     end
 end)
 
-connectExternal(player.CharacterRemoving, function()
+connectExternal(player.CharacterRemoving, function(character)
     stopFly()
     restoreNoclip()
+    -- Restore the outgoing rig before Roblox removes it, so no modified state
+    -- can leak into respawn or a replacement character.
+    local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+    local original = humanoid and movementOriginal[humanoid]
+    if humanoid and original then
+        pcall(function()
+            humanoid.WalkSpeed = original.WalkSpeed
+            humanoid.JumpPower = original.JumpPower
+            humanoid.JumpHeight = original.JumpHeight
+            humanoid.UseJumpPower = original.UseJumpPower
+            humanoid.AutoRotate = original.AutoRotate
+            humanoid.PlatformStand = original.PlatformStand
+        end)
+        movementOriginal[humanoid] = nil
+    end
+    shiftHeld = false
     -- Keep the user's Noclip toggle state; CharacterAdded reapplies it to the new rig.
 end)
 
