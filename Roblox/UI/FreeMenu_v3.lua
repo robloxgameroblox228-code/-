@@ -704,6 +704,7 @@ local function addToggle(titleText, desc, getter, setter)
     end
 end
 
+local showPage
 local function buildHome()
     clearPage()
 
@@ -1426,7 +1427,7 @@ local function buildSettings()
 
 end
 
-local function showPage(name)
+showPage = function(name)
     activePage = name
     pageTitle.Text = name
     pageDesc.Text = name == "Главная" and "Центр управления игровыми функциями"
