@@ -184,20 +184,38 @@ local window = make("Frame", {
 }, gui, "bg")
 round(window, 18)
 
--- Remote cyberpunk artwork background (Unsplash, free under Unsplash License).
--- Keep a dark tint above the image so labels and controls remain readable.
+-- Download remote cyberpunk artwork and load it as a local asset.
+-- Roblox ImageLabel cannot display an arbitrary HTTPS URL directly.
 local backgroundImage = make("ImageLabel", {
     Name = "RemoteBackground",
     Position = UDim2.fromScale(0, 0),
     Size = UDim2.fromScale(1, 1),
     BackgroundTransparency = 1,
-    Image = "https://images.unsplash.com/photo-1633218388467-539651dcf81f?auto=format&fit=crop&fm=jpg&q=80&w=1600",
+    Image = "",
     ImageColor3 = Color3.fromRGB(190, 195, 255),
     ImageTransparency = 0.18,
     ScaleType = Enum.ScaleType.Crop,
     ZIndex = 2
 }, window)
 round(backgroundImage, 18)
+
+local backgroundUrl = "https://images.unsplash.com/photo-1633218388467-539651dcf81f?auto=format&fit=crop&fm=jpg&q=80&w=1600"
+task.spawn(function()
+    local ok, err = pcall(function()
+        assert(type(writefile) == "function", "Executor does not support writefile")
+        assert(type(getcustomasset) == "function", "Executor does not support getcustomasset")
+        local imageBytes = game:HttpGet(backgroundUrl)
+        assert(type(imageBytes) == "string" and #imageBytes > 1000, "Image download returned empty data")
+        local fileName = "FreeMenu_Cyberpunk_Background.jpg"
+        writefile(fileName, imageBytes)
+        local asset = getcustomasset(fileName)
+        assert(type(asset) == "string" and #asset > 0, "Could not create local image asset")
+        backgroundImage.Image = asset
+    end)
+    if not ok then
+        warn("[FREE MENU] Background image could not be loaded: " .. tostring(err))
+    end
+end)
 
 local backgroundTint = make("Frame", {
     Name = "BackgroundTint",
