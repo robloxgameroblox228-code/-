@@ -134,11 +134,6 @@ local function log(message)
     if not active then return end
     local line = string.format("[%07.2f] %s", os.clock() - startedAt, tostring(message))
     table.insert(lines, line)
-    print("[TRAIN DIAG] " .. line)
-    pcall(function()
-        local output = env.rconsoleprint or env.rconsoleprint
-        if type(output) == "function" then output("[TRAIN DIAG] " .. line .. "\\n") end
-    end)
     if #lines > maxLines then
         table.remove(lines, 1)
         dropped += 1
