@@ -91,6 +91,7 @@ box.TextColor3 = Color3.fromRGB(205, 210, 220)
 box.PlaceholderText = "Нажми «СТАРТ», затем запрыгни на поезд и нажми ЛКМ + ПКМ."
 box.Text = ""
 box.ClearTextOnFocus = false
+box.TextEditable = false
 box.MultiLine = true
 box.TextWrapped = false
 box.TextXAlignment = Enum.TextXAlignment.Left
@@ -215,6 +216,18 @@ local function start()
     table.insert(connections, UserInputService.InputBegan:Connect(function(input, processed)
         local kind = input.UserInputType
         if kind == Enum.UserInputType.MouseMovement then return end
+        if input.KeyCode == Enum.KeyCode.Insert then return end
+        -- Ignore clicks on this diagnostics window: they are UI controls, not gameplay actions.
+        if kind == Enum.UserInputType.MouseButton1 or kind == Enum.UserInputType.MouseButton2 then
+            local mousePos = UserInputService:GetMouseLocation()
+            local overWindow = false
+            pcall(function()
+                for _, obj in ipairs(player:WaitForChild("PlayerGui"):GetGuiObjectsAtPosition(mousePos.X, mousePos.Y)) do
+                    if obj == gui or obj:IsDescendantOf(gui) then overWindow = true break end
+                end
+            end)
+            if overWindow then return end
+        end
         log("INPUT DOWN: " .. kind.Name .. " / " .. input.KeyCode.Name .. " | processed=" .. tostring(processed))
         if kind == Enum.UserInputType.MouseButton1 or kind == Enum.UserInputType.MouseButton2 then
             local name = kind == Enum.UserInputType.MouseButton1 and "LMB" or "RMB"
@@ -306,6 +319,10 @@ local function start()
                 lastPos, lastAt = nil, nil
             end
             status.Text = string.format("ЗАПИСЬ ВКЛ • %.1f сек • %d строк", now - startedAt, #lines)
+            local first = math.max(1, #lines - 79)
+            local preview = {}
+            for i = first, #lines do table.insert(preview, lines[i]) end
+            box.Text = table.concat(preview, "\\n")
             task.wait(0.5)
         end
     end)
@@ -337,6 +354,13 @@ makeButton("ЗАКРЫТЬ", 417, 93, function()
     if env.__TRAIN_DIAG_CLEANUP then env.__TRAIN_DIAG_CLEANUP() end
 end)
 
+-- Insert toggles visibility; it does not stop or clear the current recording.
+local toggleConnection = UserInputService.InputBegan:Connect(function(input, processed)
+    if input.KeyCode == Enum.KeyCode.Insert then
+        gui.Enabled = not gui.Enabled
+    end
+end)
+
 -- Simple draggable title bar.
 local dragging, dragStart, startPos = false, nil, nil
 title.InputBegan:Connect(function(input)
@@ -360,6 +384,7 @@ local function cleanup()
     cleaned = true
     if active then stop() end
     pcall(function() dragConnection:Disconnect() end)
+    pcall(function() toggleConnection:Disconnect() end)
     pcall(function() gui:Destroy() end)
     if env.__TRAIN_DIAG_CLEANUP == cleanup then env.__TRAIN_DIAG_CLEANUP = nil end
 end
@@ -368,6 +393,8 @@ gui.Destroying:Connect(function()
     if not cleaned then
         cleaned = true
         if active then stop() end
+        pcall(function() dragConnection:Disconnect() end)
+        pcall(function() toggleConnection:Disconnect() end)
         if env.__TRAIN_DIAG_CLEANUP == cleanup then env.__TRAIN_DIAG_CLEANUP = nil end
     end
 end)
