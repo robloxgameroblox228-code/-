@@ -454,6 +454,7 @@ createTab("Главная", 12)
 createTab("Визуалы", 64)
 createTab("Движение", 116)
 createTab("Настройки", 168)
+createTab("Диагностика", 220)
 
 local status = make("TextLabel", {
     BackgroundTransparency = 1,
@@ -1500,18 +1501,271 @@ local function buildSettings()
 
 end
 
+
+-- Local diagnostics: records movement, character state, input buttons and rollbacks.
+local diagnostics = {
+    active = false,
+    lines = {},
+    startedAt = 0,
+    sampleCount = 0,
+    lastPosition = nil,
+    lastSampleAt = nil,
+    connections = {},
+    droppedLines = 0,
+    uiStatus = nil,
+    uiPreview = nil
+}
+local function diagDisconnect()
+    for _, connection in ipairs(diagnostics.connections) do
+        pcall(function() connection:Disconnect() end)
+    end
+    table.clear(diagnostics.connections)
+end
+local function diagLine(message)
+    if not diagnostics.active then return end
+    local elapsed = os.clock() - diagnostics.startedAt
+    local line = string.format("[%08.2f | %s] %s", elapsed, os.date("%H:%M:%S"), tostring(message))
+    table.insert(diagnostics.lines, line)
+    if #diagnostics.lines > 8000 then
+        table.remove(diagnostics.lines, 1)
+        diagnostics.droppedLines += 1
+    end
+end
+local function diagVector(v)
+    if typeof(v) ~= "Vector3" then return "n/a" end
+    return string.format("(%.2f, %.2f, %.2f)", v.X, v.Y, v.Z)
+end
+local function diagCharacter()
+    local character = player.Character
+    if not character then return nil, nil, nil end
+    local humanoid = character:FindFirstChildOfClass("Humanoid")
+    local root = character:FindFirstChild("HumanoidRootPart")
+    return character, humanoid, root
+end
+local function diagAttachCharacter(character)
+    if not diagnostics.active or not character then return end
+    diagLine("CHARACTER появился: " .. character.Name)
+    local humanoid = character:FindFirstChildOfClass("Humanoid") or character:WaitForChild("Humanoid", 5)
+    if humanoid and diagnostics.active then
+        table.insert(diagnostics.connections, humanoid.StateChanged:Connect(function(oldState, newState)
+            diagLine("СОСТОЯНИЕ: " .. tostring(oldState.Name) .. " -> " .. tostring(newState.Name))
+        end))
+        for _, property in ipairs({"WalkSpeed", "JumpPower", "JumpHeight", "HipHeight", "PlatformStand", "AutoRotate", "Sit", "Health"}) do
+            table.insert(diagnostics.connections, humanoid:GetPropertyChangedSignal(property):Connect(function()
+                if diagnostics.active then
+                    local value = humanoid[property]
+                    diagLine("HUMANOID." .. property .. " = " .. tostring(value))
+                end
+            end))
+        end
+    end
+end
+local function diagStart()
+    if diagnostics.active then return end
+    diagnostics.lines = {}
+    diagnostics.droppedLines = 0
+    diagnostics.sampleCount = 0
+    diagnostics.startedAt = os.clock()
+    diagnostics.lastPosition = nil
+    diagnostics.lastSampleAt = nil
+    diagnostics.active = true
+    diagLine("=== FREE MENU DIAGNOSTICS START ===")
+    diagLine("PlaceId=" .. tostring(game.PlaceId) .. " | GameId=" .. tostring(game.GameId))
+    diagLine("Player=" .. player.Name .. " | UserId=" .. tostring(player.UserId))
+    diagLine("Пишутся только локальные данные; ничего никуда не отправляется.")
+    diagLine("Сэмплирование: 5 раз/сек; лимит буфера: 8000 строк.")
+    diagAttachCharacter(player.Character)
+    table.insert(diagnostics.connections, player.CharacterAdded:Connect(function(character)
+        diagAttachCharacter(character)
+    end))
+    table.insert(diagnostics.connections, player.CharacterRemoving:Connect(function(character)
+        diagLine("CHARACTER удаляется: " .. character.Name)
+        diagnostics.lastPosition = nil
+        diagnostics.lastSampleAt = nil
+    end))
+    table.insert(diagnostics.connections, UserInputService.InputBegan:Connect(function(input, processed)
+        local kind = input.UserInputType
+        if kind == Enum.UserInputType.MouseMovement then return end
+        diagLine("INPUT DOWN: " .. tostring(kind.Name) .. " / " .. tostring(input.KeyCode.Name) .. " | processed=" .. tostring(processed))
+    end))
+    table.insert(diagnostics.connections, UserInputService.InputEnded:Connect(function(input, processed)
+        local kind = input.UserInputType
+        if kind == Enum.UserInputType.MouseMovement then return end
+        diagLine("INPUT UP: " .. tostring(kind.Name) .. " / " .. tostring(input.KeyCode.Name) .. " | processed=" .. tostring(processed))
+    end))
+    table.insert(diagnostics.connections, UserInputService.WindowFocusReleased:Connect(function()
+        diagLine("WINDOW: потерян фокус окна")
+    end))
+    table.insert(diagnostics.connections, UserInputService.WindowFocused:Connect(function()
+        diagLine("WINDOW: окно снова в фокусе")
+    end))
+    task.spawn(function()
+        while diagnostics.active and gui.Parent do
+            local now = os.clock()
+            local character, humanoid, root = diagCharacter()
+            if humanoid and root and root:IsA("BasePart") then
+                local position = root.Position
+                local velocity = root.AssemblyLinearVelocity
+                local deltaTime = diagnostics.lastSampleAt and (now - diagnostics.lastSampleAt) or 0
+                local distance = diagnostics.lastPosition and (position - diagnostics.lastPosition).Magnitude or 0
+                local horizontalSpeed = Vector3.new(velocity.X, 0, velocity.Z).Magnitude
+                local stateName = "Unknown"
+                pcall(function() stateName = humanoid:GetState().Name end)
+                local floorName = "Air"
+                pcall(function() floorName = humanoid.FloorMaterial.Name end)
+                local grounded = humanoid.FloorMaterial ~= Enum.Material.Air
+                local move = humanoid.MoveDirection
+                local line = string.format(
+                    "SAMPLE #%d | pos=%s | vel=%s | speed=%.2f (horizontal=%.2f) | moved=%.2f/%.3fs | moveDir=%s | state=%s | floor=%s | grounded=%s | health=%.1f | WalkSpeed=%.1f | JumpPower=%.1f | JumpHeight=%.1f | HipHeight=%.2f | Sit=%s | PlatformStand=%s | AutoRotate=%s | noclip=%s | fly=%s | sprint=%s",
+                    diagnostics.sampleCount + 1, diagVector(position), diagVector(velocity),
+                    velocity.Magnitude, horizontalSpeed, distance, deltaTime, diagVector(move),
+                    stateName, floorName, tostring(grounded), humanoid.Health,
+                    humanoid.WalkSpeed, humanoid.JumpPower, humanoid.JumpHeight, humanoid.HipHeight,
+                    tostring(humanoid.Sit), tostring(humanoid.PlatformStand), tostring(humanoid.AutoRotate),
+                    tostring(state.noclip), tostring(state.fly), tostring(state.sprintEnabled and shiftHeld)
+                )
+                diagLine(line)
+                if diagnostics.lastPosition and deltaTime > 0 then
+                    local measured = distance / deltaTime
+                    if distance > 10 and measured > 45 then
+                        diagLine(string.format("ПОДОЗРИТЕЛЬНЫЙ СКАЧОК: %.2f studs за %.3f сек (%.2f studs/s)", distance, deltaTime, measured))
+                    elseif distance > 5 and measured > 25 and horizontalSpeed < 8 then
+                        diagLine(string.format("ВОЗМОЖНЫЙ ОТКАТ/ТЕЛЕПОРТ: позиция изменилась на %.2f studs, текущая скорость %.2f", distance, horizontalSpeed))
+                    end
+                end
+                diagnostics.lastPosition = position
+                diagnostics.lastSampleAt = now
+                diagnostics.sampleCount += 1
+            else
+                diagLine("SAMPLE: персонаж или HumanoidRootPart отсутствует")
+                diagnostics.lastPosition = nil
+                diagnostics.lastSampleAt = nil
+            end
+            if diagnostics.uiStatus and diagnostics.uiStatus.Parent then
+                diagnostics.uiStatus.Text = string.format("ЗАПИСЬ: ВКЛ • %.1f сек • %d строк", os.clock() - diagnostics.startedAt, #diagnostics.lines)
+            end
+            task.wait(0.2)
+        end
+    end)
+end
+local function diagStop()
+    if not diagnostics.active then return end
+    diagLine("=== STOP: запись остановлена пользователем ===")
+    diagnostics.active = false
+    diagDisconnect()
+    if diagnostics.uiStatus and diagnostics.uiStatus.Parent then
+        diagnostics.uiStatus.Text = string.format("ЗАПИСЬ: ВЫКЛ • %d строк", #diagnostics.lines)
+    end
+end
+local function diagGetLog()
+    local header = "FREE MENU DIAGNOSTIC LOG\n"
+    if diagnostics.droppedLines > 0 then
+        header ..= "ВНИМАНИЕ: старые строки удалены из-за лимита буфера: " .. tostring(diagnostics.droppedLines) .. "\n"
+    end
+    return header .. table.concat(diagnostics.lines, "\n")
+end
+local function diagRefreshPreview()
+    if not diagnostics.uiPreview or not diagnostics.uiPreview.Parent then return end
+    local first = math.max(1, #diagnostics.lines - 44)
+    local preview = {}
+    for i = first, #diagnostics.lines do table.insert(preview, diagnostics.lines[i]) end
+    diagnostics.uiPreview.Text = #preview > 0 and table.concat(preview, "\n") or "Лог пока пуст. Нажми «ЗАПУСТИТЬ ЛОГ»."
+end
+local function buildDiagnostics()
+    clearPage()
+    local info = card(86)
+    textLabel(info, "ЛОКАЛЬНАЯ ДИАГНОСТИКА", UDim2.fromOffset(16, 9), UDim2.new(1, -30, 0, 22), 12, C.text, true)
+    textLabel(info, "Скорость, позиция, физика, состояние персонажа, кнопки, прыжки, падения и возможные откаты сервера.", UDim2.fromOffset(16, 34), UDim2.new(1, -30, 0, 42), 9, C.muted, false)
+
+    local statusCard = card(58)
+    diagnostics.uiStatus = textLabel(statusCard, diagnostics.active and "ЗАПИСЬ: ВКЛ" or string.format("ЗАПИСЬ: ВЫКЛ • %d строк", #diagnostics.lines), UDim2.fromOffset(16, 8), UDim2.new(1, -30, 0, 40), 11, diagnostics.active and state.accent or C.text, true)
+
+    local startCard = card(66)
+    textLabel(startCard, "Начать сбор событий и замеров", UDim2.fromOffset(16, 7), UDim2.new(1, -155, 0, 48), 10, C.muted, false)
+    actionButton(startCard, "ЗАПУСТИТЬ ЛОГ", 14, 16, 132, function()
+        diagStart()
+        if diagnostics.uiStatus then diagnostics.uiStatus.Text = "ЗАПИСЬ: ВКЛ" end
+        notify("Диагностика", "Запись запущена")
+    end)
+
+    local stopCard = card(66)
+    textLabel(stopCard, "Остановить запись и зафиксировать конец лога", UDim2.fromOffset(16, 7), UDim2.new(1, -155, 0, 48), 10, C.muted, false)
+    actionButton(stopCard, "ОСТАНОВИТЬ", 14, 16, 132, function()
+        diagStop()
+        diagRefreshPreview()
+        notify("Диагностика", "Запись остановлена")
+    end, true)
+
+    local copyCard = card(66)
+    textLabel(copyCard, "Скопировать весь лог целиком в буфер обмена", UDim2.fromOffset(16, 7), UDim2.new(1, -155, 0, 48), 10, C.muted, false)
+    actionButton(copyCard, "КОПИРОВАТЬ", 14, 16, 132, function()
+        if diagnostics.active then diagStop() end
+        local fullLog = diagGetLog()
+        local clipboard = sharedEnv.setclipboard or sharedEnv.toclipboard
+        if type(clipboard) == "function" then
+            local ok, err = pcall(clipboard, fullLog)
+            if ok then
+                notify("Готово", "Полный лог скопирован (" .. tostring(#fullLog) .. " символов)")
+            else
+                warn("[FREE MENU] Clipboard failed: " .. tostring(err))
+                notify("Буфер недоступен", "Выдели текст в окне лога и скопируй вручную")
+            end
+        else
+            notify("Буфер недоступен", "Выдели текст в окне лога и скопируй вручную")
+        end
+        diagRefreshPreview()
+    end)
+
+    local clearCard = card(66)
+    textLabel(clearCard, "Удалить текущий лог из памяти меню", UDim2.fromOffset(16, 7), UDim2.new(1, -155, 0, 48), 10, C.muted, false)
+    actionButton(clearCard, "ОЧИСТИТЬ", 14, 16, 132, function()
+        if diagnostics.active then diagStop() end
+        diagnostics.lines = {}
+        diagnostics.droppedLines = 0
+        if diagnostics.uiStatus then diagnostics.uiStatus.Text = "ЗАПИСЬ: ВЫКЛ • 0 строк" end
+        diagRefreshPreview()
+        notify("Диагностика", "Лог очищен")
+    end, true)
+
+    local previewCard = card(210)
+    textLabel(previewCard, "ПОСЛЕДНИЕ СТРОКИ ЛОГА", UDim2.fromOffset(14, 8), UDim2.new(1, -28, 0, 20), 10, C.text, true)
+    local preview = make("TextBox", {
+        Position = UDim2.fromOffset(12, 34),
+        Size = UDim2.new(1, -24, 1, -44),
+        BackgroundColor3 = C.panel,
+        TextColor3 = C.muted,
+        Text = "",
+        PlaceholderText = "Лог пока пуст...",
+        Font = Enum.Font.Code,
+        TextSize = 9,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        TextYAlignment = Enum.TextYAlignment.Top,
+        TextWrapped = false,
+        TextEditable = true,
+        ClearTextOnFocus = false,
+        MultiLine = true,
+        ZIndex = 8
+    }, previewCard, "card")
+    round(preview, 8)
+    diagnostics.uiPreview = preview
+    diagRefreshPreview()
+end
+
+
 showPage = function(name)
     activePage = name
     pageTitle.Text = name
     pageDesc.Text = name == "Главная" and "Центр управления игровыми функциями"
         or name == "Визуалы" and "Подсветка игроков и эффекты персонажа"
         or name == "Движение" and "Скорость, прыжки, полёт и noclip"
+        or name == "Диагностика" and "Локальный лог физики, движения и нажатий"
         or "Внешний вид и параметры интерфейса"
     applyTheme()
     scroll.CanvasPosition = Vector2.new(0, 0)
     if name == "Главная" then buildHome()
     elseif name == "Визуалы" then buildVisuals()
     elseif name == "Движение" then buildMovement()
+    elseif name == "Диагностика" then buildDiagnostics()
     else buildSettings() end
 end
 for name, b in pairs(tabButtons) do
@@ -1626,6 +1880,7 @@ end
 local cleaned = false
 local function cleanup()
     if cleaned then return end
+    if diagnostics and diagnostics.active then diagStop() end
     cleaned = true
 
     restoreCursor()
