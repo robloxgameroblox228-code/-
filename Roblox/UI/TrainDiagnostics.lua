@@ -363,7 +363,7 @@ makeButton("КОПИРОВАТЬ", 206, 105, function()
         if ok then status.Text = "Лог скопирован • " .. #full .. " символов" else setLogText(full); status.Text = "Буфер недоступен: лог показан в окне" end
     else
         setLogText(full)
-        status.Text = "Буфер недоступен: Ctrl+A, Ctrl+C"
+        status.Text = "Буфер недоступен: лог показан в окне"
     end
 end)
 makeButton("ОЧИСТИТЬ", 319, 90, function()
