@@ -331,27 +331,24 @@ local opened = false
 local maximized = false
 local transitioning = false
 local RunService = game:GetService("RunService")
-local oldMouseBehavior, oldMouseIcon
+local oldMouseIcon
 local function unlockCursor()
-    -- Capture the game's cursor state once. Never fight the camera every frame.
-    if oldMouseBehavior == nil then
-        pcall(function() oldMouseBehavior = UserInputService.MouseBehavior end)
+    -- GuiButton.Modal is Roblox's native way to unlock the cursor for menus,
+    -- including first-person mode. Do not overwrite MouseBehavior per frame.
+    if oldMouseIcon == nil then
         pcall(function() oldMouseIcon = UserInputService.MouseIconEnabled end)
     end
     pcall(function()
-        UserInputService.MouseBehavior = Enum.MouseBehavior.Default
+        launcher.Modal = true
         UserInputService.MouseIconEnabled = true
     end)
 end
 
 local function restoreCursor()
-    if oldMouseBehavior ~= nil then
-        pcall(function() UserInputService.MouseBehavior = oldMouseBehavior end)
-    end
+    pcall(function() launcher.Modal = false end)
     if oldMouseIcon ~= nil then
         pcall(function() UserInputService.MouseIconEnabled = oldMouseIcon end)
     end
-    oldMouseBehavior = nil
     oldMouseIcon = nil
 end
 
@@ -1362,7 +1359,7 @@ end
 
 local function rememberShaderPart(part)
     if not part or not part:IsA("BasePart") or isCharacterPart(part) or shaderParts[part] then return end
-    shaderParts[part] = {Material = part.Material, Reflectance = part.Reflectance}
+    shaderParts[part] = {Reflectance = part.Reflectance, LastApplied = nil}
 end
 
 local function applyShaderPart(part)
@@ -1373,19 +1370,30 @@ local function applyShaderPart(part)
 
     -- Never replace the map's material or texture. Only change the supported
     -- Reflectance property, which is not a physically based roughness control.
-    if state.shaderMatte then
-        part.Reflectance = math.clamp(original.Reflectance * (1 - state.matteStrength / 100), 0, 1)
-    else
-        part.Reflectance = math.clamp(original.Reflectance + (state.glossStrength / 100) * 0.55, 0, 1)
+    -- Respect property changes made by the game while the effect is active.
+    if original.LastApplied ~= nil and math.abs(part.Reflectance - original.LastApplied) > 0.000001 then
+        original.Reflectance = part.Reflectance
     end
+
+    local nextValue
+    if state.shaderMatte then
+        nextValue = math.clamp(original.Reflectance * (1 - state.matteStrength / 100), 0, 1)
+    else
+        nextValue = math.clamp(original.Reflectance + (state.glossStrength / 100) * 0.55, 0, 1)
+    end
+    part.Reflectance = nextValue
+    original.LastApplied = nextValue
 end
 
 local function restoreShaderMaterials()
     for part, original in pairs(shaderParts) do
-        if part and part.Parent then
+        if part and part.Parent and original.LastApplied ~= nil then
             pcall(function()
-                part.Material = original.Material
-                part.Reflectance = original.Reflectance
+                -- Restore only if the current value is still ours. If the game
+                -- changed it independently, leave the game's value untouched.
+                if math.abs(part.Reflectance - original.LastApplied) <= 0.000001 then
+                    part.Reflectance = original.Reflectance
+                end
             end)
         end
     end
