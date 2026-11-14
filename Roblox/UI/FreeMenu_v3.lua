@@ -1185,8 +1185,6 @@ connectExternal(RunService.Heartbeat, function()
         end
     elseif state.fly then
         setFly(false)
-    end    elseif state.fly then
-        setFly(false)
     end
 end)
 
