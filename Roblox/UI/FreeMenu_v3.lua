@@ -1075,35 +1075,37 @@ local function restoreMovement()
 end
 
 connectExternal(UserInputService.InputBegan, function(input, processed)
-    if UserInputService:GetFocusedTextBox() then return end
+    if processed or opened or UserInputService:GetFocusedTextBox() then return end
     if input.KeyCode == Enum.KeyCode.LeftShift or input.KeyCode == Enum.KeyCode.RightShift then
-        shiftHeld = true
-        applyMovementStats()
+        if not shiftHeld then
+            shiftHeld = true
+            applyMovementStats()
+        end
     end
 end)
 
 connectExternal(UserInputService.InputEnded, function(input)
     if input.KeyCode == Enum.KeyCode.LeftShift or input.KeyCode == Enum.KeyCode.RightShift then
-        shiftHeld = false
-        applyMovementStats()
+        if shiftHeld then
+            shiftHeld = false
+            applyMovementStats()
+        end
     end
 end)
 
 connectExternal(RunService.Heartbeat, function()
     if not gui.Parent then return end
 
-    -- Poll key state as a fallback: InputEnded can be missed when focus changes.
+    -- Recover missed key-up events, but only update movement when the state changes.
     local focusedTextBox = UserInputService:GetFocusedTextBox() ~= nil
     local shiftDown = false
     if not opened and not focusedTextBox and state.sprintEnabled then
-        local leftDown = UserInputService:IsKeyDown(Enum.KeyCode.LeftShift)
-        local rightDown = UserInputService:IsKeyDown(Enum.KeyCode.RightShift)
-        shiftDown = leftDown or rightDown
+        shiftDown = UserInputService:IsKeyDown(Enum.KeyCode.LeftShift)
+            or UserInputService:IsKeyDown(Enum.KeyCode.RightShift)
     end
 
-    local wasShiftHeld = shiftHeld
-    shiftHeld = shiftDown
-    if state.speedEnabled or state.jumpEnabled or shiftHeld or wasShiftHeld then
+    if shiftHeld ~= shiftDown then
+        shiftHeld = shiftDown
         applyMovementStats()
     end
 
@@ -1535,10 +1537,38 @@ scroll.InputChanged:Connect(function(input)
 end)
 
 connectExternal(UserInputService.InputBegan, function(input, processed)
-    if not processed and input.KeyCode == Enum.KeyCode.Insert then
+    if processed then return end
+    if input.KeyCode == Enum.KeyCode.End then
+        emergencyStop()
+    elseif input.KeyCode == Enum.KeyCode.Insert then
         if opened then closeMenu() else openMenu() end
     end
 end)
+local function emergencyStop()
+    -- Stop all character-affecting features and restore the values captured at activation.
+    state.speedEnabled = false
+    state.sprintEnabled = false
+    state.jumpEnabled = false
+    state.noclip = false
+    state.fly = false
+    shiftHeld = false
+
+    stopFly()
+    restoreNoclip()
+    restoreMovement()
+
+    state.playerESP = false
+    state.playerChams = false
+    refreshPlayerVisuals()
+
+    state.overheadHat = false
+    state.overheadTrail = false
+    state.overheadParticles = false
+    clearOwnEffects()
+
+    notify("Аварийная остановка", "Движение и эффекты отключены")
+end
+
 local cleaned = false
 local function cleanup()
     if cleaned then return end
