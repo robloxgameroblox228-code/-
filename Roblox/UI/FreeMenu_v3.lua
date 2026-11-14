@@ -641,6 +641,8 @@ local function applyTheme()
             if obj:IsA("TextBox") then
                 obj.TextColor3 = C.text
                 obj.PlaceholderColor3 = C.muted
+            elseif obj:IsA("TextButton") then
+                obj.TextColor3 = C.text
             end
         elseif role == "text" then obj.TextColor3 = C.text
         elseif role == "muted" then obj.TextColor3 = C.muted
@@ -1476,7 +1478,7 @@ local function applyShaderColor()
     end
 end
 
-local functionlocal function buildShaders()
+local function buildShaders()
     clearPage()
 
     local intro = card(88)
