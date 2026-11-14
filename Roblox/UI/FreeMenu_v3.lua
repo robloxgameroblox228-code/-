@@ -1,4 +1,4 @@
--- FREE MENU v3.0 | movement tools and reviewed UI build
+-- FREE MENU v3.1 | camera, movement and graphics refactor
 -- Sections: Test, Visuals, Movement, Settings. Character movement tools included.
 
 local Players = game:GetService("Players")
@@ -465,7 +465,7 @@ local status = make("TextLabel", {
     BackgroundTransparency = 1,
     Position = UDim2.new(0, 14, 1, -30),
     Size = UDim2.new(1, -28, 0, 16),
-    Text = "FREE BUILD  •  3.0",
+    Text = "FREE BUILD  •  3.1",
     Font = Enum.Font.Gotham,
     TextSize = 9,
     TextXAlignment = Enum.TextXAlignment.Left,
