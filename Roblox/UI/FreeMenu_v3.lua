@@ -913,6 +913,7 @@ end)
 -- Movement controller: restores original character properties when features are disabled.
 local movementOriginal = {}
 local noclipOriginal = {}
+local noclipDescAddedConnection
 local flyVelocity, flyGyro
 local flyCharacter
 local shiftHeld = false
@@ -959,6 +960,11 @@ local function applyMovementStats()
 end
 
 local function restoreNoclip()
+    if noclipDescAddedConnection then
+        pcall(function() noclipDescAddedConnection:Disconnect() end)
+        noclipDescAddedConnection = nil
+    end
+
     for part, original in pairs(noclipOriginal) do
         if part and part.Parent then
             pcall(function() part.CanCollide = original end)
@@ -967,22 +973,27 @@ local function restoreNoclip()
     table.clear(noclipOriginal)
 end
 
+local function applyNoclipToPart(object)
+    if not state.noclip or not object or not object:IsA("BasePart") then return end
+    if noclipOriginal[object] == nil then
+        noclipOriginal[object] = object.CanCollide
+    end
+    object.CanCollide = false
+end
+
 local function setNoclip(enabled)
     state.noclip = enabled
-    if not enabled then
-        restoreNoclip()
-        return
-    end
+    restoreNoclip()
+    if not enabled then return end
+
     local character = player.Character
     if not character then return end
+
+    -- Apply once to existing parts; only process future parts when they appear.
     for _, object in ipairs(character:GetDescendants()) do
-        if object:IsA("BasePart") then
-            if noclipOriginal[object] == nil then
-                noclipOriginal[object] = object.CanCollide
-            end
-            object.CanCollide = false
-        end
+        applyNoclipToPart(object)
     end
+    noclipDescAddedConnection = character.DescendantAdded:Connect(applyNoclipToPart)
 end
 
 local function stopFly()
@@ -1080,25 +1091,20 @@ end)
 
 connectExternal(RunService.Heartbeat, function()
     if not gui.Parent then return end
-    if UserInputService:GetFocusedTextBox() and shiftHeld then
-        shiftHeld = false
-    end
-    if state.speedEnabled or (state.sprintEnabled and shiftHeld) or state.jumpEnabled then
-        applyMovementStats()
+
+    -- Poll key state as a fallback: InputEnded can be missed when focus changes.
+    local focusedTextBox = UserInputService:GetFocusedTextBox() ~= nil
+    local shiftDown = false
+    if not opened and not focusedTextBox and state.sprintEnabled then
+        local leftDown = UserInputService:IsKeyDown(Enum.KeyCode.LeftShift)
+        local rightDown = UserInputService:IsKeyDown(Enum.KeyCode.RightShift)
+        shiftDown = leftDown or rightDown
     end
 
-    if state.noclip then
-        local character = player.Character
-        if character then
-            for _, object in ipairs(character:GetDescendants()) do
-                if object:IsA("BasePart") then
-                    if noclipOriginal[object] == nil then
-                        noclipOriginal[object] = object.CanCollide
-                    end
-                    object.CanCollide = false
-                end
-            end
-        end
+    local wasShiftHeld = shiftHeld
+    shiftHeld = shiftDown
+    if state.speedEnabled or state.jumpEnabled or shiftHeld or wasShiftHeld then
+        applyMovementStats()
     end
 
     if state.fly and flyVelocity and flyVelocity.Parent then
@@ -1132,6 +1138,7 @@ end)
 connectExternal(player.CharacterRemoving, function()
     stopFly()
     restoreNoclip()
+    -- Keep the user's Noclip toggle state; CharacterAdded reapplies it to the new rig.
 end)
 
 connectExternal(player.CharacterAdded, function(character)
@@ -1184,6 +1191,7 @@ local function buildMovement()
     movementValueCard("Скорость бега", "Скорость при удержании Shift", function() return state.sprintSpeed end, function(v) state.sprintSpeed = v end, 2, 1, 250, "")
     addToggle("Бег на Shift", "Удерживай Shift для ускорения", function() return state.sprintEnabled end, function(v)
         state.sprintEnabled = v
+        if not v then shiftHeld = false end
         applyMovementStats()
     end)
 
