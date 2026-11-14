@@ -1708,12 +1708,13 @@ local function buildDiagnostics()
                 notify("Готово", "Полный лог скопирован (" .. tostring(#fullLog) .. " символов)")
             else
                 warn("[FREE MENU] Clipboard failed: " .. tostring(err))
-                notify("Буфер недоступен", "Выдели текст в окне лога и скопируй вручную")
+                if diagnostics.uiPreview and diagnostics.uiPreview.Parent then diagnostics.uiPreview.Text = fullLog end
+                notify("Буфер недоступен", "Полный лог открыт ниже: Ctrl+A и Ctrl+C")
             end
         else
-            notify("Буфер недоступен", "Выдели текст в окне лога и скопируй вручную")
+            if diagnostics.uiPreview and diagnostics.uiPreview.Parent then diagnostics.uiPreview.Text = fullLog end
+            notify("Буфер недоступен", "Полный лог открыт ниже: Ctrl+A и Ctrl+C")
         end
-        diagRefreshPreview()
     end)
 
     local clearCard = card(66)
