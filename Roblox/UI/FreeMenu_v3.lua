@@ -1458,17 +1458,29 @@ local function applyShaderMaterials()
         shaderMaterialToken += 1
         local token = shaderMaterialToken
         task.spawn(function()
-            local descendants = workspace:GetDescendants()
-            for index, item in ipairs(descendants) do
+            -- Traverse incrementally rather than allocating one giant descendant
+            -- array for the entire map. New items are also covered by DescendantAdded.
+            local stack = workspace:GetChildren()
+            local visited = 0
+            while #stack > 0 do
                 if token ~= shaderMaterialToken or not (state.shaderGloss or state.shaderMatte) then
                     return
                 end
-                if item:IsA("BasePart") then
-                    applyShaderPart(item)
+
+                local item = table.remove(stack)
+                if item and item.Parent then
+                    if item:IsA("BasePart") then
+                        applyShaderPart(item)
+                    end
+                    local children = item:GetChildren()
+                    for _, child in ipairs(children) do
+                        table.insert(stack, child)
+                    end
                 end
-                if index % 180 == 0 then task.wait() end
+
+                visited += 1
+                if visited % 180 == 0 then task.wait() end
             end
-            -- The scan completed; future slider edits use the cached parts.
         end)
     else
         -- If a scan is in progress it keeps reading the current slider values;
@@ -1902,6 +1914,9 @@ local function cleanup()
     table.clear(playerCharacterConnections)
     clearOwnEffects()
     restoreMovement()
+    -- Block queued DescendantAdded callbacks from creating new overrides after cleanup.
+    state.shaderGloss = false
+    state.shaderMatte = false
     restoreShaderMaterials()
     if shaderEffect then pcall(function() shaderEffect:Destroy() end); shaderEffect = nil end
     if shaderBloomEffect then pcall(function() shaderBloomEffect:Destroy() end); shaderBloomEffect = nil end
