@@ -183,6 +183,33 @@ local window = make("Frame", {
     ZIndex = 2
 }, gui, "bg")
 round(window, 18)
+
+-- Remote cyberpunk artwork background (Unsplash, free under Unsplash License).
+-- Keep a dark tint above the image so labels and controls remain readable.
+local backgroundImage = make("ImageLabel", {
+    Name = "RemoteBackground",
+    Position = UDim2.fromScale(0, 0),
+    Size = UDim2.fromScale(1, 1),
+    BackgroundTransparency = 1,
+    Image = "https://images.unsplash.com/photo-1633218388467-539651dcf81f?auto=format&fit=crop&fm=jpg&q=80&w=1600",
+    ImageColor3 = Color3.fromRGB(190, 195, 255),
+    ImageTransparency = 0.18,
+    ScaleType = Enum.ScaleType.Crop,
+    ZIndex = 2
+}, window)
+round(backgroundImage, 18)
+
+local backgroundTint = make("Frame", {
+    Name = "BackgroundTint",
+    Position = UDim2.fromScale(0, 0),
+    Size = UDim2.fromScale(1, 1),
+    BackgroundColor3 = Color3.fromRGB(8, 10, 20),
+    BackgroundTransparency = 0.28,
+    BorderSizePixel = 0,
+    ZIndex = 2
+}, window)
+round(backgroundTint, 18)
+
 local windowScale = make("UIScale", {Scale = 1}, window)
 stroke(window)
 
