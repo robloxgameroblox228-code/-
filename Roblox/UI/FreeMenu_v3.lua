@@ -5,6 +5,7 @@ local Players = game:GetService("Players")
 local TweenService = game:GetService("TweenService")
 local UserInputService = game:GetService("UserInputService")
 local CoreGui = game:GetService("CoreGui")
+local Lighting = game:GetService("Lighting")
 
 -- Keep one active copy and disconnect listeners from previous executions.
 local sharedEnv = _G
@@ -65,7 +66,12 @@ local state = {
     particleStyle = "Звёзды", playerExpanded = false, ownExpanded = false,
     speedEnabled = false, sprintEnabled = true, jumpEnabled = false,
     walkSpeed = 16, sprintSpeed = 28, jumpPower = 50, jumpHeight = 7.2,
-    noclip = false, fly = false, flySpeed = 55
+    noclip = false, fly = false, flySpeed = 55,
+    shaderGloss = false, shaderMatte = false,
+    glossStrength = 55, matteStrength = 65,
+    shaderContrast = 0, shaderSaturation = 0, shaderBrightness = 0,
+    shaderHue = 0, shaderShadows = 0, shaderHighlights = 0,
+    shaderCurve = 0
 }
 
 local palettes = {
@@ -1301,16 +1307,155 @@ local function buildVisuals()
     end
 end
 
+-- Local-only post-processing and material overrides for the shader page.
+local shaderEffect
+local shaderOriginalAmbient = Lighting.Ambient
+local shaderOriginalOutdoorAmbient = Lighting.OutdoorAmbient
+local shaderOriginalExposure = Lighting.ExposureCompensation
+local shaderParts = {}
+local function isCharacterPart(part)
+    for _, target in ipairs(Players:GetPlayers()) do
+        if target.Character and part:IsDescendantOf(target.Character) then return true end
+    end
+    return false
+end
+
+local function rememberShaderPart(part)
+    if not part:IsA("BasePart") or isCharacterPart(part) or shaderParts[part] then return end
+    shaderParts[part] = {Material = part.Material, Reflectance = part.Reflectance}
+end
+
+local function applyShaderMaterials()
+    for part, original in pairs(shaderParts) do
+        if not part.Parent then
+            shaderParts[part] = nil
+        else
+            local gloss = state.shaderGloss and state.glossStrength / 100 or 0
+            local matte = state.shaderMatte and state.matteStrength / 100 or 0
+            if matte > 0 then
+                part.Material = Enum.Material.Plastic
+                part.Reflectance = original.Reflectance * (1 - matte) + gloss * 0.55 * (1 - matte)
+            elseif gloss > 0 then
+                part.Material = original.Material
+                part.Reflectance = math.clamp(original.Reflectance + gloss * 0.55, 0, 1)
+            else
+                part.Material = original.Material
+                part.Reflectance = original.Reflectance
+            end
+        end
+    end
+end
+
+for _, item in ipairs(workspace:GetDescendants()) do
+    if item:IsA("BasePart") then rememberShaderPart(item) end
+end
+connectExternal(workspace.DescendantAdded, function(item)
+    if item:IsA("BasePart") then
+        task.defer(function()
+            if item.Parent then rememberShaderPart(item); applyShaderMaterials() end
+        end)
+    end
+end)
+
+local function applyShaderColor()
+    if not shaderEffect or not shaderEffect.Parent then
+        shaderEffect = Instance.new("ColorCorrectionEffect")
+        shaderEffect.Name = "FreeMenu_LocalColorGrade"
+        shaderEffect.Parent = Lighting
+    end
+    local hue = (state.shaderHue % 360) / 360
+    local tint = Color3.fromHSV(hue, math.clamp(math.abs(state.shaderHue) / 720, 0, 0.22), 1)
+    shaderEffect.TintColor = tint
+    shaderEffect.Contrast = math.clamp(state.shaderContrast / 100 + state.shaderCurve / 200, -1, 1)
+    shaderEffect.Saturation = math.clamp(state.shaderSaturation / 100, -1, 1)
+    shaderEffect.Brightness = math.clamp(state.shaderBrightness / 100, -1, 1)
+    -- Roblox has no independent shadow/highlight grading or editable RGB curves;
+    -- these controls approximate them with ambient fill and exposure.
+    local shadow = state.shaderShadows / 100
+    local ambientTarget = shadow >= 0 and Color3.new(1,1,1) or Color3.new(0,0,0)
+    local ambientMix = math.abs(shadow) * 0.65
+    Lighting.Ambient = shaderOriginalAmbient:Lerp(ambientTarget, ambientMix)
+    Lighting.OutdoorAmbient = shaderOriginalOutdoorAmbient:Lerp(ambientTarget, ambientMix)
+    Lighting.ExposureCompensation = shaderOriginalExposure + state.shaderHighlights / 100
+end
+
+local function restoreShaderMaterials()
+    for part, original in pairs(shaderParts) do
+        if part.Parent then
+            pcall(function()
+                part.Material = original.Material
+                part.Reflectance = original.Reflectance
+            end)
+        end
+    end
+    table.clear(shaderParts)
+end
+
 local function buildShaders()
     clearPage()
 
-    local intro = card(86)
-    textLabel(intro, "ШЕЙДЕРЫ И ГРАФИКА", UDim2.fromOffset(16, 10), UDim2.new(1, -30, 0, 22), 12, C.text, true)
-    textLabel(intro, "Отдельный раздел для визуальных фильтров и настроек освещения.", UDim2.fromOffset(16, 38), UDim2.new(1, -30, 0, 34), 9, C.muted)
+    local intro = card(88)
+    textLabel(intro, "ШЕЙДЕРЫ И ЦВЕТОКОРРЕКЦИЯ", UDim2.fromOffset(16, 9), UDim2.new(1, -30, 0, 22), 12, C.text, true)
+    textLabel(intro, "Локальные эффекты: видишь их только ты. Настройки применяются сразу.", UDim2.fromOffset(16, 35), UDim2.new(1, -30, 0, 38), 9, C.muted)
 
-    local placeholder = card(112)
-    textLabel(placeholder, "РАЗДЕЛ ПОДГОТОВЛЕН", UDim2.fromOffset(16, 13), UDim2.new(1, -30, 0, 22), 12, state.accent, true)
-    textLabel(placeholder, "Пока здесь нет переключателей — добавим нужные шейдеры и эффекты по твоим следующим указаниям.", UDim2.fromOffset(16, 43), UDim2.new(1, -32, 0, 52), 10, C.muted)
+    local function addValueControl(titleText, description, key, minValue, maxValue, step, suffix, callback)
+        local f = card(72)
+        textLabel(f, titleText, UDim2.fromOffset(14, 6), UDim2.new(1, -150, 0, 20), 11, C.text, true)
+        textLabel(f, description, UDim2.fromOffset(14, 29), UDim2.new(1, -150, 0, 30), 8, C.muted, false)
+        local valueLabel = textLabel(f, tostring(state[key]) .. (suffix or ""), UDim2.new(1, -132, 0, 7), UDim2.fromOffset(48, 18), 10, state.accent, true)
+        valueLabel.TextXAlignment = Enum.TextXAlignment.Center
+        local function makeStepButton(caption, x, delta)
+            local b = make("TextButton", {
+                Position = UDim2.new(1, x, 0, 34),
+                Size = UDim2.fromOffset(32, 28),
+                BackgroundColor3 = C.hover, Text = caption,
+                TextColor3 = C.text, Font = Enum.Font.GothamBold,
+                TextSize = 13, AutoButtonColor = false, ZIndex = 8
+            }, f, "hover")
+            round(b, 7)
+            b.Activated:Connect(function()
+                state[key] = math.clamp(state[key] + delta, minValue, maxValue)
+                valueLabel.Text = tostring(state[key]) .. (suffix or "")
+                if callback then callback() end
+            end)
+        end
+        makeStepButton("−", -84, -step)
+        makeStepButton("+", -44, step)
+    end
+
+    addToggle("Глянцевые поверхности", "Добавляет блеск материалам объектов карты", function() return state.shaderGloss end, function(v)
+        state.shaderGloss = v; applyShaderMaterials()
+    end)
+    addValueControl("Сила глянца", "Интенсивность отражающей поверхности", "glossStrength", 0, 100, 5, "%", applyShaderMaterials)
+    addToggle("Матовые поверхности", "Убирает блеск и приближает материалы к матовым", function() return state.shaderMatte end, function(v)
+        state.shaderMatte = v; applyShaderMaterials()
+    end)
+    addValueControl("Сила матовости", "Насколько сильно приглушается отражение", "matteStrength", 0, 100, 5, "%", applyShaderMaterials)
+
+    local section = card(42)
+    textLabel(section, "ЦВЕТОКОРРЕКЦИЯ • HSL", UDim2.fromOffset(14, 8), UDim2.new(1, -28, 0, 24), 11, state.accent, true)
+    addValueControl("Контрастность", "Общий контраст изображения", "shaderContrast", -100, 100, 5, "", applyShaderColor)
+    addValueControl("Насыщенность", "Интенсивность цветов", "shaderSaturation", -100, 100, 5, "", applyShaderColor)
+    addValueControl("Яркость", "Общее осветление или затемнение", "shaderBrightness", -100, 100, 5, "", applyShaderColor)
+    addValueControl("Оттенок H", "Сдвиг цветового тона", "shaderHue", 0, 360, 5, "°", applyShaderColor)
+    addValueControl("Тени", "Приближённая настройка заполнения тёмных зон", "shaderShadows", -100, 100, 5, "", applyShaderColor)
+    addValueControl("Света", "Экспозиция светлых и общих участков", "shaderHighlights", -100, 100, 5, "", applyShaderColor)
+    addValueControl("Кривые", "Приближение RGB-кривой через контраст", "shaderCurve", -100, 100, 5, "", applyShaderColor)
+
+    local reset = card(58)
+    actionButton(reset, "СБРОСИТЬ ЦВЕТ", 14, 12, 116, function()
+        state.shaderContrast = 0; state.shaderSaturation = 0; state.shaderBrightness = 0
+        state.shaderHue = 0; state.shaderShadows = 0; state.shaderHighlights = 0; state.shaderCurve = 0
+        applyShaderColor(); buildShaders()
+    end, true)
+    actionButton(reset, "ВЫКЛЮЧИТЬ ВСЁ", 142, 12, 116, function()
+        state.shaderGloss = false; state.shaderMatte = false
+        state.shaderContrast = 0; state.shaderSaturation = 0; state.shaderBrightness = 0
+        state.shaderHue = 0; state.shaderShadows = 0; state.shaderHighlights = 0; state.shaderCurve = 0
+        applyShaderMaterials(); applyShaderColor(); buildShaders()
+    end, true)
+    applyShaderColor()
+    applyShaderMaterials()
 end
 
 local function buildSettings()
@@ -1475,6 +1620,7 @@ showPage = function(name)
     if name == "Главная" then buildHome()
     elseif name == "Визуалы" then buildVisuals()
     elseif name == "Движение" then buildMovement()
+    elseif name == "Шейдеры" then buildShaders()
     else buildSettings() end
 end
 for name, b in pairs(tabButtons) do
@@ -1613,6 +1759,13 @@ local function cleanup()
     end
     clearOwnEffects()
     restoreMovement()
+    restoreShaderMaterials()
+    if shaderEffect then pcall(function() shaderEffect:Destroy() end); shaderEffect = nil end
+    pcall(function()
+        Lighting.Ambient = shaderOriginalAmbient
+        Lighting.OutdoorAmbient = shaderOriginalOutdoorAmbient
+        Lighting.ExposureCompensation = shaderOriginalExposure
+    end)
 
     pcall(function()
         if sharedEnv.__FREE_MENU_CLEANUP == cleanup then
