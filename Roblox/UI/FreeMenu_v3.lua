@@ -5,7 +5,6 @@ local Players = game:GetService("Players")
 local TweenService = game:GetService("TweenService")
 local UserInputService = game:GetService("UserInputService")
 local CoreGui = game:GetService("CoreGui")
-local Lighting = game:GetService("Lighting")
 
 -- Keep one active copy and disconnect listeners from previous executions.
 local sharedEnv = _G
@@ -67,10 +66,6 @@ local state = {
     speedEnabled = false, sprintEnabled = true, jumpEnabled = false,
     walkSpeed = 16, sprintSpeed = 28, jumpPower = 50, jumpHeight = 7.2,
     noclip = false, fly = false, flySpeed = 55,
-    shaderGloss = false, shaderMatte = false,
-    glossStrength = 55, matteStrength = 65,
-    shaderContrast = 0, shaderSaturation = 0, shaderBrightness = 0,
-    shaderHue = 0, shaderShadows = 0, shaderHighlights = 0
 }
 
 local palettes = {
@@ -457,9 +452,8 @@ local function createTab(name, y)
 end
 createTab("Главная", 12)
 createTab("Визуалы", 64)
-createTab("Графика", 116)
-createTab("Движение", 168)
-createTab("Настройки", 220)
+createTab("Движение", 116)
+createTab("Настройки", 168)
 
 local status = make("TextLabel", {
     BackgroundTransparency = 1,
@@ -1356,261 +1350,6 @@ local function buildVisuals()
     end
 end
 
--- Local visual controls. Roblox LocalScripts do not expose arbitrary GPU shaders,
--- roughness maps, editable RGB curves, or independent shadow/highlight grading.
--- This implementation only uses supported part reflectance and post-processing.
-local shaderEffect
-local shaderBloomEffect
-local shaderParts = {}
-local shaderMaterialSession = false
-local shaderMaterialToken = 0
-local shaderApplyToken = 0
-
-local function isCharacterPart(part)
-    local ancestor = part.Parent
-    while ancestor and ancestor ~= workspace do
-        if ancestor:IsA("Model") and ancestor:FindFirstChildOfClass("Humanoid") then
-            return true
-        end
-        ancestor = ancestor.Parent
-    end
-    return false
-end
-
-local function rememberShaderPart(part)
-    if not part or not part:IsA("BasePart") or isCharacterPart(part) or shaderParts[part] then return end
-    shaderParts[part] = {Reflectance = part.Reflectance, LastApplied = nil}
-end
-
-local function applyShaderPart(part)
-    if not part or not part.Parent or not (state.shaderGloss or state.shaderMatte) then return end
-    rememberShaderPart(part)
-    local original = shaderParts[part]
-    if not original then return end
-
-    -- Never replace the map's material or texture. Only change the supported
-    -- Reflectance property, which is not a physically based roughness control.
-    -- Respect property changes made by the game while the effect is active.
-    if original.LastApplied ~= nil and math.abs(part.Reflectance - original.LastApplied) > 0.000001 then
-        original.Reflectance = part.Reflectance
-    end
-
-    local nextValue
-    if state.shaderMatte then
-        nextValue = math.clamp(original.Reflectance * (1 - state.matteStrength / 100), 0, 1)
-    else
-        nextValue = math.clamp(original.Reflectance + (state.glossStrength / 100) * 0.55, 0, 1)
-    end
-    part.Reflectance = nextValue
-    original.LastApplied = nextValue
-end
-
-local function restoreShaderMaterials()
-    -- Invalidate any background scan/re-apply jobs before restoring properties.
-    shaderMaterialToken += 1
-    shaderApplyToken += 1
-    for part, original in pairs(shaderParts) do
-        if part and part.Parent and original.LastApplied ~= nil then
-            pcall(function()
-                -- Restore only if the current value is still ours. If the game
-                -- changed it independently, leave the game's value untouched.
-                if math.abs(part.Reflectance - original.LastApplied) <= 0.000001 then
-                    part.Reflectance = original.Reflectance
-                end
-            end)
-        end
-    end
-    table.clear(shaderParts)
-    shaderMaterialSession = false
-end
-
-local function scheduleShaderReapply()
-    shaderApplyToken += 1
-    local token = shaderApplyToken
-    task.spawn(function()
-        local parts = {}
-        for part in pairs(shaderParts) do
-            table.insert(parts, part)
-        end
-        for index, part in ipairs(parts) do
-            if token ~= shaderApplyToken or not (state.shaderGloss or state.shaderMatte) then
-                return
-            end
-            if part and part.Parent then
-                applyShaderPart(part)
-            end
-            if index % 180 == 0 then task.wait() end
-        end
-    end)
-end
-
-local function applyShaderMaterials()
-    local active = state.shaderGloss or state.shaderMatte
-    if not active then
-        restoreShaderMaterials()
-        return
-    end
-
-    -- Scan existing map parts asynchronously in small batches. A large map
-    -- should not freeze the UI when a visual toggle is enabled.
-    if not shaderMaterialSession then
-        shaderMaterialSession = true
-        shaderMaterialToken += 1
-        local token = shaderMaterialToken
-        task.spawn(function()
-            -- Traverse incrementally rather than allocating one giant descendant
-            -- array for the entire map. New items are also covered by DescendantAdded.
-            local stack = workspace:GetChildren()
-            local visited = 0
-            while #stack > 0 do
-                if token ~= shaderMaterialToken or not (state.shaderGloss or state.shaderMatte) then
-                    return
-                end
-
-                local item = table.remove(stack)
-                if item and item.Parent then
-                    if item:IsA("BasePart") then
-                        applyShaderPart(item)
-                    end
-                    local children = item:GetChildren()
-                    for _, child in ipairs(children) do
-                        table.insert(stack, child)
-                    end
-                end
-
-                visited += 1
-                if visited % 180 == 0 then task.wait() end
-            end
-        end)
-    else
-        -- If a scan is in progress it keeps reading the current slider values;
-        -- this batch updates the parts already visited without cancelling it.
-        scheduleShaderReapply()
-    end
-end
-
-connectExternal(workspace.DescendantAdded, function(item)
-    if item:IsA("BasePart") and (state.shaderGloss or state.shaderMatte) then
-        task.defer(function()
-            if item.Parent then applyShaderPart(item) end
-        end)
-    end
-end)
-
-local function applyShaderColor()
-    local hasColorGrade = state.shaderContrast ~= 0 or state.shaderSaturation ~= 0
-        or state.shaderBrightness ~= 0 or state.shaderHue ~= 0
-        or state.shaderShadows ~= 0
-
-    if hasColorGrade then
-        if not shaderEffect or not shaderEffect.Parent then
-            shaderEffect = Instance.new("ColorCorrectionEffect")
-            shaderEffect.Name = "FreeMenu_LocalColorGrade"
-            shaderEffect.Parent = Lighting
-        end
-
-        local hue = (state.shaderHue % 360) / 360
-        local tintStrength = math.clamp(math.abs(state.shaderHue) / 360, 0, 1) * 0.32
-        local tint = Color3.fromHSV(hue, tintStrength, 1)
-        shaderEffect.TintColor = tint
-        shaderEffect.Contrast = math.clamp(state.shaderContrast / 100, -1, 1)
-        shaderEffect.Saturation = math.clamp(state.shaderSaturation / 100, -1, 1)
-        -- Shadow lift is only an approximation through overall brightness.
-        shaderEffect.Brightness = math.clamp(state.shaderBrightness / 100 + state.shaderShadows / 300, -1, 1)
-    elseif shaderEffect then
-        pcall(function() shaderEffect:Destroy() end)
-        shaderEffect = nil
-    end
-
-    -- Bloom affects bright pixels, but it is glow, not a reflection or shader.
-    if state.shaderHighlights > 0 then
-        if not shaderBloomEffect or not shaderBloomEffect.Parent then
-            shaderBloomEffect = Instance.new("BloomEffect")
-            shaderBloomEffect.Name = "FreeMenu_LocalBloom"
-            shaderBloomEffect.Parent = Lighting
-        end
-        local amount = state.shaderHighlights / 100
-        shaderBloomEffect.Intensity = amount * 1.5
-        shaderBloomEffect.Size = 24 + amount * 32
-        -- A threshold of 1 catches only near-white pixels; lower it gradually
-        -- as the user increases Bloom so more bright regions can glow.
-        shaderBloomEffect.Threshold = 1 - amount * 0.85
-    elseif shaderBloomEffect then
-        pcall(function() shaderBloomEffect:Destroy() end)
-        shaderBloomEffect = nil
-    end
-end
-
-local function buildShaders()
-    clearPage()
-
-    local intro = card(88)
-    textLabel(intro, "ГРАФИКА И ПОСТОБРАБОТКА", UDim2.fromOffset(16, 9), UDim2.new(1, -30, 0, 22), 12, C.text, true)
-    textLabel(intro, "Reflectance, цветокоррекция и Bloom. Это не произвольные GPU-шейдеры.", UDim2.fromOffset(16, 35), UDim2.new(1, -30, 0, 38), 9, C.muted)
-
-    local function addValueControl(titleText, description, key, minValue, maxValue, step, suffix, callback)
-        local f = card(72)
-        textLabel(f, titleText, UDim2.fromOffset(14, 6), UDim2.new(1, -150, 0, 20), 11, C.text, true)
-        textLabel(f, description, UDim2.fromOffset(14, 29), UDim2.new(1, -150, 0, 30), 8, C.muted, false)
-        local valueLabel = textLabel(f, tostring(state[key]) .. (suffix or ""), UDim2.new(1, -132, 0, 7), UDim2.fromOffset(48, 18), 10, state.accent, true)
-        valueLabel.TextXAlignment = Enum.TextXAlignment.Center
-        local function makeStepButton(caption, x, delta)
-            local b = make("TextButton", {
-                Position = UDim2.new(1, x, 0, 34),
-                Size = UDim2.fromOffset(32, 28),
-                BackgroundColor3 = C.hover, Text = caption,
-                TextColor3 = C.text, Font = Enum.Font.GothamBold,
-                TextSize = 13, AutoButtonColor = false, ZIndex = 8
-            }, f, "hover")
-            round(b, 7)
-            b.Activated:Connect(function()
-                state[key] = math.clamp(state[key] + delta, minValue, maxValue)
-                valueLabel.Text = tostring(state[key]) .. (suffix or "")
-                if callback then callback() end
-            end)
-        end
-        makeStepButton("−", -84, -step)
-        makeStepButton("+", -44, step)
-    end
-
-    addToggle("Глянцевые поверхности", "Повышает отражение неба; результат зависит от материала, это не зеркало", function() return state.shaderGloss end, function(v)
-        state.shaderGloss = v
-        if v then state.shaderMatte = false end
-        applyShaderMaterials()
-    end)
-    addValueControl("Сила глянца", "Интенсивность отражающей поверхности", "glossStrength", 0, 100, 5, "%", applyShaderMaterials)
-    addToggle("Приглушить отражение", "Снижает уже существующий Reflectance; шероховатость текстур не меняется", function() return state.shaderMatte end, function(v)
-        state.shaderMatte = v
-        if v then state.shaderGloss = false end
-        applyShaderMaterials()
-    end)
-    addValueControl("Сила матовости", "Насколько сильно приглушается отражение", "matteStrength", 0, 100, 5, "%", applyShaderMaterials)
-
-    local section = card(42)
-    textLabel(section, "ЦВЕТОКОРРЕКЦИЯ И ПОСТОБРАБОТКА", UDim2.fromOffset(14, 8), UDim2.new(1, -28, 0, 24), 11, state.accent, true)
-    addValueControl("Контрастность", "Общий контраст изображения", "shaderContrast", -100, 100, 5, "", applyShaderColor)
-    addValueControl("Насыщенность", "Интенсивность цветов", "shaderSaturation", -100, 100, 5, "", applyShaderColor)
-    addValueControl("Яркость", "Общее осветление или затемнение", "shaderBrightness", -100, 100, 5, "", applyShaderColor)
-    addValueControl("Цветовое тонирование", "Накладывает мягкий цветовой фильтр, а не вращает HSL каждого пикселя", "shaderHue", 0, 360, 5, "°", applyShaderColor)
-    addValueControl("Поднятие теней", "Приближение через общую яркость; независимой коррекции теней нет", "shaderShadows", -100, 100, 5, "", applyShaderColor)
-    addValueControl("Bloom", "Свечение ярких пикселей; не меняет отражения материалов", "shaderHighlights", 0, 100, 5, "", applyShaderColor)
-
-    local reset = card(58)
-    actionButton(reset, "СБРОСИТЬ ЦВЕТ", 14, 12, 116, function()
-        state.shaderContrast = 0; state.shaderSaturation = 0; state.shaderBrightness = 0
-        state.shaderHue = 0; state.shaderShadows = 0; state.shaderHighlights = 0
-        applyShaderColor(); buildShaders()
-    end, true)
-    actionButton(reset, "ВЫКЛЮЧИТЬ ВСЁ", 142, 12, 116, function()
-        state.shaderGloss = false; state.shaderMatte = false
-        state.shaderContrast = 0; state.shaderSaturation = 0; state.shaderBrightness = 0
-        state.shaderHue = 0; state.shaderShadows = 0; state.shaderHighlights = 0
-        applyShaderMaterials(); applyShaderColor(); buildShaders()
-    end, true)
-    applyShaderColor()
-    applyShaderMaterials()
-end
-
 local function buildSettings()
     clearPage()
     local f = card(100)
@@ -1767,14 +1506,12 @@ showPage = function(name)
     pageDesc.Text = name == "Главная" and "Центр управления игровыми функциями"
         or name == "Визуалы" and "Подсветка игроков и эффекты персонажа"
         or name == "Движение" and "Скорость, прыжки, полёт и noclip"
-        or name == "Графика" and "Отражение, цветокоррекция и Bloom"
         or "Внешний вид и параметры интерфейса"
     applyTheme()
     scroll.CanvasPosition = Vector2.new(0, 0)
     if name == "Главная" then buildHome()
     elseif name == "Визуалы" then buildVisuals()
     elseif name == "Движение" then buildMovement()
-    elseif name == "Графика" then buildShaders()
     else buildSettings() end
 end
 for name, b in pairs(tabButtons) do
@@ -1882,17 +1619,6 @@ emergencyStop = function()
     state.overheadParticles = false
     clearOwnEffects()
 
-    state.shaderGloss = false
-    state.shaderMatte = false
-    state.shaderContrast = 0
-    state.shaderSaturation = 0
-    state.shaderBrightness = 0
-    state.shaderHue = 0
-    state.shaderShadows = 0
-    state.shaderHighlights = 0
-    restoreShaderMaterials()
-    applyShaderColor()
-
     if showPage then showPage(activePage) end
     notify("Аварийная остановка", "Движение, визуалы и фильтры отключены")
 end
@@ -1916,13 +1642,6 @@ local function cleanup()
     table.clear(playerCharacterConnections)
     clearOwnEffects()
     restoreMovement()
-    -- Block queued DescendantAdded callbacks from creating new overrides after cleanup.
-    state.shaderGloss = false
-    state.shaderMatte = false
-    restoreShaderMaterials()
-    if shaderEffect then pcall(function() shaderEffect:Destroy() end); shaderEffect = nil end
-    if shaderBloomEffect then pcall(function() shaderBloomEffect:Destroy() end); shaderBloomEffect = nil end
-
     pcall(function()
         if sharedEnv.__FREE_MENU_CLEANUP == cleanup then
             sharedEnv.__FREE_MENU_CLEANUP = nil
