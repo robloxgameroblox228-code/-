@@ -1513,7 +1513,11 @@ local diagnostics = {
     connections = {},
     droppedLines = 0,
     uiStatus = nil,
-    uiPreview = nil
+    uiPreview = nil,
+    clickedTarget = nil,
+    clickedTargetAt = 0,
+    lastMouseDown = {},
+    lastAnimSignature = ""
 }
 local function diagDisconnect()
     for _, connection in ipairs(diagnostics.connections) do
@@ -1542,6 +1546,92 @@ local function diagCharacter()
     local root = character:FindFirstChild("HumanoidRootPart")
     return character, humanoid, root
 end
+local function diagPath(instance)
+    if not instance then return "nil" end
+    local names = {}
+    local current = instance
+    for _ = 1, 5 do
+        if not current then break end
+        table.insert(names, 1, current.Name)
+        current = current.Parent
+    end
+    return table.concat(names, "/")
+end
+local function diagTargetDetails(target, hitPosition)
+    if not target or not target:IsA("BasePart") then
+        diagLine("TARGET: курсор не попал в BasePart")
+        return
+    end
+    local assembly = target.AssemblyRootPart or target
+    local character, _, root = diagCharacter()
+    local relative = "n/a"
+    if root then
+        relative = diagVector(root.Position - target.Position)
+    end
+    diagLine("TARGET CLICK: " .. diagPath(target)
+        .. " | class=" .. target.ClassName
+        .. " | partPos=" .. diagVector(target.Position)
+        .. " | hitPos=" .. diagVector(hitPosition)
+        .. " | assemblyRoot=" .. diagPath(assembly)
+        .. " | assemblyVel=" .. diagVector(assembly.AssemblyLinearVelocity)
+        .. " | playerMinusTarget=" .. relative)
+end
+local function diagLogCharacterConnections(character)
+    local count = 0
+    for _, item in ipairs(character:GetDescendants()) do
+        if item:IsA("JointInstance") or item:IsA("WeldConstraint")
+            or item:IsA("AlignPosition") or item:IsA("AlignOrientation")
+            or item:IsA("RopeConstraint") or item:IsA("RodConstraint")
+            or item:IsA("HingeConstraint") then
+            local connected = ""
+            pcall(function()
+                if item:IsA("JointInstance") then
+                    connected = " Part0=" .. diagPath(item.Part0) .. " Part1=" .. diagPath(item.Part1)
+                elseif item:IsA("WeldConstraint") then
+                    connected = " Part0=" .. diagPath(item.Part0) .. " Part1=" .. diagPath(item.Part1)
+                end
+            end)
+            diagLine("CHAR CONNECTION: " .. item.ClassName .. " " .. diagPath(item) .. connected)
+            count += 1
+        end
+    end
+    if count == 0 then diagLine("CHAR CONNECTION: видимых локально соединений не найдено") end
+end
+local function diagLogAnimations(humanoid)
+    local animator = humanoid and humanoid:FindFirstChildOfClass("Animator")
+    if not animator then return end
+    local tracks = animator:GetPlayingAnimationTracks()
+    local parts = {}
+    for _, track in ipairs(tracks) do
+        local animationId = "unknown"
+        pcall(function()
+            if track.Animation then animationId = track.Animation.AnimationId end
+        end)
+        table.insert(parts, tostring(animationId) .. ":" .. tostring(track.Speed) .. ":" .. tostring(track.WeightCurrent))
+    end
+    local signature = table.concat(parts, "|")
+    if signature ~= diagnostics.lastAnimSignature then
+        diagnostics.lastAnimSignature = signature
+        if #tracks == 0 then
+            diagLine("ANIMATION: активных треков нет")
+        else
+            for _, track in ipairs(tracks) do
+                local animationId, animationName = "unknown", "unknown"
+                pcall(function()
+                    if track.Animation then
+                        animationId = track.Animation.AnimationId
+                        animationName = track.Animation.Name
+                    end
+                end)
+                diagLine("ANIMATION: id=" .. tostring(animationId)
+                    .. " | name=" .. tostring(animationName)
+                    .. " | speed=" .. tostring(track.Speed)
+                    .. " | weight=" .. tostring(track.WeightCurrent)
+                    .. " | priority=" .. tostring(track.Priority))
+            end
+        end
+    end
+end
 local function diagAttachCharacter(character)
     if not diagnostics.active or not character then return end
     diagLine("CHARACTER появился: " .. character.Name)
@@ -1568,6 +1658,10 @@ local function diagStart()
     diagnostics.startedAt = os.clock()
     diagnostics.lastPosition = nil
     diagnostics.lastSampleAt = nil
+    diagnostics.clickedTarget = nil
+    diagnostics.clickedTargetAt = 0
+    diagnostics.lastMouseDown = {}
+    diagnostics.lastAnimSignature = ""
     diagnostics.active = true
     diagLine("=== FREE MENU DIAGNOSTICS START ===")
     diagLine("PlaceId=" .. tostring(game.PlaceId) .. " | GameId=" .. tostring(game.GameId))
@@ -1575,8 +1669,12 @@ local function diagStart()
     diagLine("Пишутся только локальные данные; ничего никуда не отправляется.")
     diagLine("Сэмплирование: 5 раз/сек; лимит буфера: 8000 строк.")
     diagAttachCharacter(player.Character)
+    if player.Character then diagLogCharacterConnections(player.Character) end
     table.insert(diagnostics.connections, player.CharacterAdded:Connect(function(character)
         diagAttachCharacter(character)
+        task.delay(0.5, function()
+            if diagnostics.active and character.Parent then diagLogCharacterConnections(character) end
+        end)
     end))
     table.insert(diagnostics.connections, player.CharacterRemoving:Connect(function(character)
         diagLine("CHARACTER удаляется: " .. character.Name)
@@ -1586,7 +1684,25 @@ local function diagStart()
     table.insert(diagnostics.connections, UserInputService.InputBegan:Connect(function(input, processed)
         local kind = input.UserInputType
         if kind == Enum.UserInputType.MouseMovement then return end
+        local now = os.clock()
         diagLine("INPUT DOWN: " .. tostring(kind.Name) .. " / " .. tostring(input.KeyCode.Name) .. " | processed=" .. tostring(processed))
+        if kind == Enum.UserInputType.MouseButton1 or kind == Enum.UserInputType.MouseButton2 then
+            local buttonName = kind == Enum.UserInputType.MouseButton1 and "LMB" or "RMB"
+            diagnostics.lastMouseDown[buttonName] = now
+            local otherName = buttonName == "LMB" and "RMB" or "LMB"
+            if diagnostics.lastMouseDown[otherName] and math.abs(now - diagnostics.lastMouseDown[otherName]) <= 0.25 then
+                diagLine("ЗАЦЕП: ЛКМ + ПКМ нажаты почти одновременно (интервал <= 0.25 сек)")
+            end
+            local mouse = player:GetMouse()
+            local target, hit = nil, Vector3.zero
+            pcall(function()
+                target = mouse.Target
+                hit = mouse.Hit.Position
+            end)
+            diagnostics.clickedTarget = target
+            diagnostics.clickedTargetAt = now
+            diagTargetDetails(target, hit)
+        end
     end))
     table.insert(diagnostics.connections, UserInputService.InputEnded:Connect(function(input, processed)
         local kind = input.UserInputType
@@ -1604,6 +1720,7 @@ local function diagStart()
             local now = os.clock()
             local character, humanoid, root = diagCharacter()
             if humanoid and root and root:IsA("BasePart") then
+                diagLogAnimations(humanoid)
                 local position = root.Position
                 local velocity = root.AssemblyLinearVelocity
                 local deltaTime = diagnostics.lastSampleAt and (now - diagnostics.lastSampleAt) or 0
@@ -1625,6 +1742,23 @@ local function diagStart()
                     tostring(state.noclip), tostring(state.fly), tostring(state.sprintEnabled and shiftHeld)
                 )
                 diagLine(line)
+                local clickedTarget = diagnostics.clickedTarget
+                if clickedTarget and clickedTarget.Parent and (now - diagnostics.clickedTargetAt) <= 12 then
+                    local targetAssembly = clickedTarget.AssemblyRootPart or clickedTarget
+                    local targetVelocity = targetAssembly.AssemblyLinearVelocity
+                    local relativeVelocity = velocity - targetVelocity
+                    local relativePosition = position - clickedTarget.Position
+                    diagLine("TRAIN/TARGET TRACK | part=" .. diagPath(clickedTarget)
+                        .. " | playerPos=" .. diagVector(position)
+                        .. " | targetPos=" .. diagVector(clickedTarget.Position)
+                        .. " | relativePos=" .. diagVector(relativePosition)
+                        .. " | targetVel=" .. diagVector(targetVelocity)
+                        .. " | relativeVel=" .. diagVector(relativeVelocity)
+                        .. " | distance=" .. string.format("%.2f", relativePosition.Magnitude))
+                elseif clickedTarget and not clickedTarget.Parent then
+                    diagLine("TARGET LOST: выбранная деталь удалена из Workspace")
+                    diagnostics.clickedTarget = nil
+                end
                 if diagnostics.lastPosition and deltaTime > 0 then
                     local measured = distance / deltaTime
                     if distance > 10 and measured > 45 then
