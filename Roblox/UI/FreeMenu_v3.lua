@@ -50,7 +50,7 @@ end
 
 local state = {
     theme = "Dark",
-    accent = Color3.fromRGB(110, 145, 255),
+    accent = Color3.fromRGB(151, 112, 255),
     transparency = 0,
     scale = 1,
     animations = true,
@@ -70,11 +70,11 @@ local state = {
 
 local palettes = {
     Dark = {
-        bg = Color3.fromRGB(17, 19, 25),
-        panel = Color3.fromRGB(24, 27, 35),
-        card = Color3.fromRGB(32, 36, 46),
-        hover = Color3.fromRGB(43, 48, 61),
-        line = Color3.fromRGB(54, 61, 77),
+        bg = Color3.fromRGB(10, 12, 20),
+        panel = Color3.fromRGB(17, 20, 31),
+        card = Color3.fromRGB(25, 29, 44),
+        hover = Color3.fromRGB(37, 42, 62),
+        line = Color3.fromRGB(58, 64, 91),
         text = Color3.fromRGB(242, 244, 250),
         muted = Color3.fromRGB(151, 160, 179)
     },
@@ -148,10 +148,10 @@ local gui = make("ScreenGui", {
 
 local launcher = make("TextButton", {
     Name = "Launcher",
-    Size = UDim2.fromOffset(64, 46),
+    Size = UDim2.fromOffset(76, 48),
     Position = UDim2.new(0, 22, 0.5, -23),
     BackgroundColor3 = C.panel,
-    Text = "FREE",
+    Text = "✦ FREE",
     TextColor3 = state.accent,
     Font = Enum.Font.GothamBold,
     TextSize = 14,
@@ -174,8 +174,8 @@ round(shadow, 20)
 
 local window = make("Frame", {
     Name = "Window",
-    Size = UDim2.fromOffset(760, 510),
-    Position = UDim2.new(0.5, -380, 0.5, -255),
+    Size = UDim2.fromOffset(820, 550),
+    Position = UDim2.new(0.5, -410, 0.5, -275),
     BackgroundColor3 = C.bg,
     BackgroundTransparency = state.transparency,
     Visible = false,
@@ -199,7 +199,9 @@ local backgroundImage = make("ImageLabel", {
 }, window)
 round(backgroundImage, 18)
 
-local backgroundUrl = "https://images.unsplash.com/photo-1633218388467-539651dcf81f?auto=format&fit=crop&fm=jpg&q=85&w=1600"
+local sharedArtworkAsset = ""
+local homeArtwork
+local backgroundUrl = "https://images.unsplash.com/photo-1519608487953-e999c86e7455?auto=format&fit=crop&fm=jpg&q=88&w=1600"
 task.spawn(function()
     local ok, err = pcall(function()
         assert(type(writefile) == "function", "writefile is unavailable")
@@ -228,8 +230,10 @@ task.spawn(function()
         assert(type(assetLoader) == "function", "No custom asset loader is available")
         local asset = assetLoader(fileName)
         assert(type(asset) == "string" and #asset > 0, "Custom asset loader returned an empty asset")
+        sharedArtworkAsset = asset
         backgroundImage.Image = asset
-        print("[FREE MENU] Background image loaded (" .. tostring(#imageBytes) .. " bytes)")
+        if homeArtwork and homeArtwork.Parent then homeArtwork.Image = asset end
+        print("[FREE MENU] Artwork loaded (" .. tostring(#imageBytes) .. " bytes)")
     end)
 
     if not ok then
@@ -359,7 +363,7 @@ local function restoreCursor()
         pcall(function() UserInputService.MouseIconEnabled = oldMouseIcon end)
     end
 end
-local baseSize = Vector2.new(760, 510)
+local baseSize = Vector2.new(820, 550)
 local function getDisplayScale()
     local scale = state.scale
     local camera = workspace.CurrentCamera
@@ -442,7 +446,7 @@ local content = make("Frame", {
 round(content, 14)
 
 local tabButtons = {}
-local activePage = "Тест"
+local activePage = "Главная"
 local function createTab(name, y)
     local b = make("TextButton", {
         Position = UDim2.fromOffset(9, y),
@@ -463,9 +467,9 @@ local function createTab(name, y)
     tabButtons[name] = b
     return b
 end
-createTab("Тест", 12)
+createTab("Главная", 12)
 createTab("Визуалы", 64)
-createTab("Movement", 116)
+createTab("Движение", 116)
 createTab("Настройки", 168)
 
 local status = make("TextLabel", {
@@ -556,7 +560,7 @@ local function actionButton(parentObj, caption, x, y, width, callback, secondary
     local b = make("TextButton", {
         AnchorPoint = Vector2.new(1, 0),
         Position = UDim2.new(1, -(x or 14), 0, y or 22),
-        Size = UDim2.fromOffset(width or 112, 34),
+        Size = UDim2.fromOffset((width or 112) <= 40 and (width or 32) or 116, 34),
         BackgroundColor3 = secondary and C.hover or state.accent,
         Text = caption,
         TextColor3 = secondary and C.text or Color3.fromRGB(15, 18, 25),
@@ -700,31 +704,59 @@ local function addToggle(titleText, desc, getter, setter)
     end
 end
 
-local function buildTest()
+local function buildHome()
     clearPage()
-    local f = card(82)
-    textLabel(f, "Проверка уведомлений", UDim2.fromOffset(16, 10), UDim2.new(1, -160, 0, 22), 12, C.text, true)
-    textLabel(f, "Проверь, как выглядят системные сообщения меню", UDim2.fromOffset(16, 37), UDim2.new(1, -160, 0, 20), 9, C.muted)
-    actionButton(f, "ПРОВЕРИТЬ", 14, 24, 116, function() notify("Всё работает", "Тестовое уведомление отображается корректно.") end)
 
-    local f2 = card(82)
-    textLabel(f2, "Тест анимации", UDim2.fromOffset(16, 10), UDim2.new(1, -160, 0, 22), 12, C.text, true)
-    textLabel(f2, "Проверь плавность появления элементов", UDim2.fromOffset(16, 37), UDim2.new(1, -160, 0, 20), 9, C.muted)
-    actionButton(f2, "ЗАПУСТИТЬ", 14, 24, 116, function()
-        local bar = make("Frame", {Position = UDim2.fromOffset(16, 67), Size = UDim2.fromOffset(8, 4), BackgroundColor3 = state.accent, ZIndex = 9}, f2, "accent")
-        round(bar, 3)
-        tween(bar, {Size = UDim2.fromOffset(math.max(80, f2.AbsoluteSize.X - 48), 4)}, 0.45)
-        task.delay(1, function() if bar.Parent then tween(bar, {BackgroundTransparency = 1}, 0.2); task.wait(0.22); if bar.Parent then bar:Destroy() end end end)
-    end)
+    local hero = make("ImageLabel", {
+        Name = "HomeArtwork",
+        Size = UDim2.new(1, -5, 0, 154),
+        BackgroundColor3 = C.card,
+        BackgroundTransparency = 0,
+        Image = sharedArtworkAsset,
+        ImageColor3 = Color3.fromRGB(210, 220, 255),
+        ImageTransparency = 0.06,
+        ScaleType = Enum.ScaleType.Crop,
+        LayoutOrder = 1,
+        ZIndex = 5
+    }, scroll, "card")
+    homeArtwork = hero
+    round(hero, 14)
+    local shade = make("Frame", {
+        Size = UDim2.fromScale(1, 1),
+        BackgroundColor3 = Color3.fromRGB(8, 10, 20),
+        BackgroundTransparency = 0.28,
+        BorderSizePixel = 0,
+        ZIndex = 6
+    }, hero)
+    round(shade, 14)
+    textLabel(hero, "FREE MENU", UDim2.fromOffset(20, 24), UDim2.new(1, -40, 0, 34), 24, Color3.new(1,1,1), true).ZIndex = 7
+    textLabel(hero, "YOUR GAME. YOUR RULES.", UDim2.fromOffset(22, 62), UDim2.new(1, -44, 0, 20), 10, Color3.fromRGB(220,225,245), true).ZIndex = 7
+    textLabel(hero, "Настрой игровой процесс под себя", UDim2.fromOffset(22, 94), UDim2.new(1, -44, 0, 22), 11, Color3.fromRGB(235,238,248), false).ZIndex = 7
 
-    local f3 = card(72)
-    textLabel(f3, "Плавная прокрутка", UDim2.fromOffset(16, 10), UDim2.new(1, -30, 0, 22), 12, C.text, true)
-    textLabel(f3, "Прокрути эту страницу колёсиком мыши или свайпом", UDim2.fromOffset(16, 36), UDim2.new(1, -30, 0, 20), 9, C.muted)
-    for i = 1, 4 do
-        local extra = card(60)
-        textLabel(extra, "Демонстрационный блок 0" .. i, UDim2.fromOffset(16, 8), UDim2.new(1, -30, 0, 20), 11, C.text, true)
-        textLabel(extra, "Нужен только для проверки высоты и прокрутки страницы", UDim2.fromOffset(16, 30), UDim2.new(1, -30, 0, 18), 9, C.muted)
+    local quick = card(82)
+    textLabel(quick, "БЫСТРЫЙ ДОСТУП", UDim2.fromOffset(16, 9), UDim2.new(1, -30, 0, 18), 10, C.muted, true)
+    local function quickButton(caption, x, target)
+        local b = make("TextButton", {
+            Position = UDim2.fromOffset(x, 38),
+            Size = UDim2.fromOffset(142, 32),
+            BackgroundColor3 = C.hover,
+            Text = caption,
+            TextColor3 = C.text,
+            Font = Enum.Font.GothamSemibold,
+            TextSize = 10,
+            AutoButtonColor = false,
+            ZIndex = 8
+        }, quick, "hover")
+        round(b, 9)
+        b.Activated:Connect(function() showPage(target) end)
     end
+    quickButton("ВИЗУАЛЫ", 16, "Визуалы")
+    quickButton("ДВИЖЕНИЕ", 170, "Движение")
+    quickButton("НАСТРОЙКИ", 324, "Настройки")
+
+    local info = card(72)
+    textLabel(info, "Всё под контролем", UDim2.fromOffset(16, 10), UDim2.new(1, -30, 0, 22), 13, C.text, true)
+    textLabel(info, "ESP • Chams • Fly • Noclip • Sprint • персональное оформление", UDim2.fromOffset(16, 37), UDim2.new(1, -30, 0, 20), 9, C.muted, false)
 end
 
 local visualGuiParent = player:FindFirstChildOfClass("PlayerGui") or parent
@@ -1397,14 +1429,15 @@ end
 local function showPage(name)
     activePage = name
     pageTitle.Text = name
-    pageDesc.Text = name == "Тест" and "Проверка элементов интерфейса"
-        or name == "Визуалы" and "Внешний вид и эффекты оформления"
-        or "Темы, цвета и общие параметры"
+    pageDesc.Text = name == "Главная" and "Центр управления игровыми функциями"
+        or name == "Визуалы" and "Подсветка игроков и эффекты персонажа"
+        or name == "Движение" and "Скорость, прыжки, полёт и noclip"
+        or "Внешний вид и параметры интерфейса"
     applyTheme()
     scroll.CanvasPosition = Vector2.new(0, 0)
-    if name == "Тест" then buildTest()
+    if name == "Главная" then buildHome()
     elseif name == "Визуалы" then buildVisuals()
-    elseif name == "Movement" then buildMovement()
+    elseif name == "Движение" then buildMovement()
     else buildSettings() end
 end
 for name, b in pairs(tabButtons) do
@@ -1528,5 +1561,5 @@ end)
 
 gui.Destroying:Connect(cleanup)
 
-showPage("Тест")
+showPage("Главная")
 applyTheme()
