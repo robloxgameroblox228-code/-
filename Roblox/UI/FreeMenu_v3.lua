@@ -184,36 +184,56 @@ local window = make("Frame", {
 }, gui, "bg")
 round(window, 18)
 
--- Download remote cyberpunk artwork and load it as a local asset.
--- Roblox ImageLabel cannot display an arbitrary HTTPS URL directly.
+-- Download artwork through Zynova's request API and load it as a local asset.
+-- The asset is placed behind translucent panels so it remains visible.
 local backgroundImage = make("ImageLabel", {
     Name = "RemoteBackground",
     Position = UDim2.fromScale(0, 0),
     Size = UDim2.fromScale(1, 1),
     BackgroundTransparency = 1,
     Image = "",
-    ImageColor3 = Color3.fromRGB(190, 195, 255),
-    ImageTransparency = 0.18,
+    ImageColor3 = Color3.fromRGB(210, 220, 255),
+    ImageTransparency = 0.04,
     ScaleType = Enum.ScaleType.Crop,
     ZIndex = 2
 }, window)
 round(backgroundImage, 18)
 
-local backgroundUrl = "https://images.unsplash.com/photo-1633218388467-539651dcf81f?auto=format&fit=crop&fm=jpg&q=80&w=1600"
+local backgroundUrl = "https://images.unsplash.com/photo-1633218388467-539651dcf81f?auto=format&fit=crop&fm=jpg&q=85&w=1600"
 task.spawn(function()
     local ok, err = pcall(function()
-        assert(type(writefile) == "function", "Executor does not support writefile")
-        assert(type(getcustomasset) == "function", "Executor does not support getcustomasset")
-        local imageBytes = game:HttpGet(backgroundUrl)
-        assert(type(imageBytes) == "string" and #imageBytes > 1000, "Image download returned empty data")
+        assert(type(writefile) == "function", "writefile is unavailable")
+        local imageBytes
+
+        if type(request) == "function" then
+            local response = request({
+                Url = backgroundUrl,
+                Method = "GET",
+                Headers = { ["User-Agent"] = "Mozilla/5.0" }
+            })
+            assert(type(response) == "table", "HTTP request returned an invalid response")
+            assert(response.Success ~= false and (not response.StatusCode or response.StatusCode == 200), "HTTP status: " .. tostring(response.StatusCode))
+            imageBytes = response.Body
+        end
+
+        if type(imageBytes) ~= "string" or #imageBytes < 1000 then
+            imageBytes = game:HttpGet(backgroundUrl)
+        end
+        assert(type(imageBytes) == "string" and #imageBytes > 1000, "Downloaded image is empty or too small")
+
         local fileName = "FreeMenu_Cyberpunk_Background.jpg"
         writefile(fileName, imageBytes)
-        local asset = getcustomasset(fileName)
-        assert(type(asset) == "string" and #asset > 0, "Could not create local image asset")
+
+        local assetLoader = getcustomasset or getsynasset
+        assert(type(assetLoader) == "function", "No custom asset loader is available")
+        local asset = assetLoader(fileName)
+        assert(type(asset) == "string" and #asset > 0, "Custom asset loader returned an empty asset")
         backgroundImage.Image = asset
+        print("[FREE MENU] Background image loaded (" .. tostring(#imageBytes) .. " bytes)")
     end)
+
     if not ok then
-        warn("[FREE MENU] Background image could not be loaded: " .. tostring(err))
+        warn("[FREE MENU] Background image failed: " .. tostring(err))
     end
 end)
 
@@ -235,6 +255,7 @@ local top = make("Frame", {
     Name = "TopBar",
     Size = UDim2.new(1, 0, 0, 66),
     BackgroundColor3 = C.panel,
+    BackgroundTransparency = 0.24,
     BorderSizePixel = 0,
     ZIndex = 3
 }, window, "panel")
@@ -403,6 +424,7 @@ local sidebar = make("Frame", {
     Position = UDim2.fromOffset(14, 78),
     Size = UDim2.new(0, 166, 1, -92),
     BackgroundColor3 = C.panel,
+    BackgroundTransparency = 0.20,
     BorderSizePixel = 0,
     ZIndex = 3
 }, window, "panel")
@@ -412,6 +434,7 @@ local content = make("Frame", {
     Position = UDim2.fromOffset(192, 78),
     Size = UDim2.new(1, -206, 1, -92),
     BackgroundColor3 = C.panel,
+    BackgroundTransparency = 0.20,
     BorderSizePixel = 0,
     ClipsDescendants = true,
     ZIndex = 3
@@ -520,6 +543,7 @@ local function card(height)
     local f = make("Frame", {
         Size = UDim2.new(1, -5, 0, height or 76),
         BackgroundColor3 = C.card,
+        BackgroundTransparency = 0.16,
         BorderSizePixel = 0,
         LayoutOrder = #scroll:GetChildren() + 1,
         ZIndex = 5
