@@ -4,6 +4,7 @@
 
 local Players = game:GetService("Players")
 local UserInputService = game:GetService("UserInputService")
+local ContextActionService = game:GetService("ContextActionService")
 local RunService = game:GetService("RunService")
 local CoreGui = game:GetService("CoreGui")
 
@@ -77,29 +78,46 @@ local function makeButton(label, x, width, callback)
     b.TextSize = 10
     b.Parent = frame
     Instance.new("UICorner", b).CornerRadius = UDim.new(0, 6)
-    b.MouseButton1Click:Connect(callback)
+    b.Activated:Connect(callback)
     return b
 end
 
-local box = Instance.new("TextBox")
-box.Name = "Log"
-box.Position = UDim2.fromOffset(10, 105)
-box.Size = UDim2.new(1, -20, 1, -115)
-box.BackgroundColor3 = Color3.fromRGB(13, 14, 18)
-box.BorderSizePixel = 0
-box.TextColor3 = Color3.fromRGB(205, 210, 220)
-box.PlaceholderText = "Нажми «СТАРТ», затем запрыгни на поезд и нажми ЛКМ + ПКМ."
-box.Text = ""
-box.ClearTextOnFocus = false
-box.TextEditable = false
-box.MultiLine = true
-box.TextWrapped = false
-box.TextXAlignment = Enum.TextXAlignment.Left
-box.TextYAlignment = Enum.TextYAlignment.Top
-box.Font = Enum.Font.Code
-box.TextSize = 10
-box.Parent = frame
-Instance.new("UICorner", box).CornerRadius = UDim.new(0, 6)
+local logFrame = Instance.new("ScrollingFrame")
+logFrame.Name = "Log"
+logFrame.Position = UDim2.fromOffset(10, 105)
+logFrame.Size = UDim2.new(1, -20, 1, -115)
+logFrame.BackgroundColor3 = Color3.fromRGB(13, 14, 18)
+logFrame.BorderSizePixel = 0
+logFrame.ScrollBarThickness = 6
+logFrame.CanvasSize = UDim2.new()
+logFrame.AutomaticCanvasSize = Enum.AutomaticSize.Y
+logFrame.ScrollingDirection = Enum.ScrollingDirection.Y
+logFrame.Parent = frame
+Instance.new("UICorner", logFrame).CornerRadius = UDim.new(0, 6)
+
+local logText = Instance.new("TextLabel")
+logText.Name = "Output"
+logText.Position = UDim2.fromOffset(8, 8)
+logText.Size = UDim2.new(1, -16, 0, 0)
+logText.AutomaticSize = Enum.AutomaticSize.Y
+logText.BackgroundTransparency = 1
+logText.TextColor3 = Color3.fromRGB(205, 210, 220)
+logText.Text = "Нажми СТАРТ, затем запрыгни на поезд и нажми ЛКМ + ПКМ."
+logText.TextWrapped = false
+logText.TextXAlignment = Enum.TextXAlignment.Left
+logText.TextYAlignment = Enum.TextYAlignment.Top
+logText.Font = Enum.Font.Code
+logText.TextSize = 10
+logText.Parent = logFrame
+
+local function setLogText(value)
+    logText.Text = tostring(value or "")
+    task.defer(function()
+        if logFrame.Parent then
+            logFrame.CanvasPosition = Vector2.new(0, math.max(0, logText.AbsoluteSize.Y - logFrame.AbsoluteSize.Y))
+        end
+    end)
+end
 
 local active = false
 local lines = {}
@@ -116,6 +134,11 @@ local function log(message)
     if not active then return end
     local line = string.format("[%07.2f] %s", os.clock() - startedAt, tostring(message))
     table.insert(lines, line)
+    print("[TRAIN DIAG] " .. line)
+    pcall(function()
+        local output = env.rconsoleprint or env.rconsoleprint
+        if type(output) == "function" then output("[TRAIN DIAG] " .. line .. "\\n") end
+    end)
     if #lines > maxLines then
         table.remove(lines, 1)
         dropped += 1
@@ -186,7 +209,7 @@ local function stop()
     for _, c in ipairs(connections) do pcall(function() c:Disconnect() end) end
     table.clear(connections)
     status.Text = "ЗАПИСЬ ВЫКЛ • " .. #lines .. " строк"
-    box.Text = (dropped > 0 and ("Удалено старых строк: " .. dropped .. "\n") or "") .. table.concat(lines, "\n")
+    setLogText((dropped > 0 and ("Удалено старых строк: " .. dropped .. "\n") or "") .. table.concat(lines, "\n"))
 end
 
 local function start()
@@ -322,7 +345,7 @@ local function start()
             local first = math.max(1, #lines - 79)
             local preview = {}
             for i = first, #lines do table.insert(preview, lines[i]) end
-            box.Text = table.concat(preview, "\\n")
+            setLogText(table.concat(preview, "\n"))
             task.wait(0.5)
         end
     end)
@@ -337,16 +360,16 @@ makeButton("КОПИРОВАТЬ", 206, 105, function()
     pcall(function() clipboard = env.setclipboard or env.toclipboard end)
     if type(clipboard) == "function" then
         local ok = pcall(clipboard, full)
-        if ok then status.Text = "Лог скопирован • " .. #full .. " символов" else box.Text = full; status.Text = "Буфер недоступен: Ctrl+A, Ctrl+C" end
+        if ok then status.Text = "Лог скопирован • " .. #full .. " символов" else setLogText(full); status.Text = "Буфер недоступен: лог показан в окне" end
     else
-        box.Text = full
+        setLogText(full)
         status.Text = "Буфер недоступен: Ctrl+A, Ctrl+C"
     end
 end)
 makeButton("ОЧИСТИТЬ", 319, 90, function()
     if active then stop() end
     lines, dropped = {}, 0
-    box.Text = ""
+    setLogText("")
     status.Text = "ЛОГ ОЧИЩЕН"
 end)
 makeButton("ЗАКРЫТЬ", 417, 93, function()
@@ -355,11 +378,13 @@ makeButton("ЗАКРЫТЬ", 417, 93, function()
 end)
 
 -- Insert toggles visibility; it does not stop or clear the current recording.
-local toggleConnection = UserInputService.InputBegan:Connect(function(input, processed)
-    if input.KeyCode == Enum.KeyCode.Insert then
+local TOGGLE_ACTION = "TrainDiagnostics_Toggle"
+ContextActionService:BindActionAtPriority(TOGGLE_ACTION, function(_, inputState)
+    if inputState == Enum.UserInputState.Begin then
         gui.Enabled = not gui.Enabled
     end
-end)
+    return Enum.ContextActionResult.Sink
+end, false, 3000, Enum.KeyCode.Insert)
 
 -- Simple draggable title bar.
 local dragging, dragStart, startPos = false, nil, nil
@@ -384,7 +409,7 @@ local function cleanup()
     cleaned = true
     if active then stop() end
     pcall(function() dragConnection:Disconnect() end)
-    pcall(function() toggleConnection:Disconnect() end)
+    pcall(function() ContextActionService:UnbindAction(TOGGLE_ACTION) end)
     pcall(function() gui:Destroy() end)
     if env.__TRAIN_DIAG_CLEANUP == cleanup then env.__TRAIN_DIAG_CLEANUP = nil end
 end
@@ -394,9 +419,9 @@ gui.Destroying:Connect(function()
         cleaned = true
         if active then stop() end
         pcall(function() dragConnection:Disconnect() end)
-        pcall(function() toggleConnection:Disconnect() end)
+        pcall(function() ContextActionService:UnbindAction(TOGGLE_ACTION) end)
         if env.__TRAIN_DIAG_CLEANUP == cleanup then env.__TRAIN_DIAG_CLEANUP = nil end
     end
 end)
 
-status.Text = "ЗАПИСЬ ВЫКЛ • нажми СТАРТ"
+status.Text = "ЗАПИСЬ ВЫКЛ • Insert — скрыть/показать"
