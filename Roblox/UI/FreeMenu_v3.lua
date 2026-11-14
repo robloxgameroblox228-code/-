@@ -70,8 +70,7 @@ local state = {
     shaderGloss = false, shaderMatte = false,
     glossStrength = 55, matteStrength = 65,
     shaderContrast = 0, shaderSaturation = 0, shaderBrightness = 0,
-    shaderHue = 0, shaderShadows = 0, shaderHighlights = 0,
-    shaderCurve = 0
+    shaderHue = 0, shaderShadows = 0, shaderHighlights = 0
 }
 
 local palettes = {
@@ -458,7 +457,7 @@ local function createTab(name, y)
 end
 createTab("Главная", 12)
 createTab("Визуалы", 64)
-createTab("Шейдеры", 116)
+createTab("Графика", 116)
 createTab("Движение", 168)
 createTab("Настройки", 220)
 
@@ -754,6 +753,7 @@ end
 
 local visualGuiParent = player:FindFirstChildOfClass("PlayerGui") or parent
 local playerVisuals = {}
+local playerCharacterConnections = {}
 local function clearPlayerVisual(target)
     local objects = playerVisuals[target]
     if objects then
@@ -812,7 +812,7 @@ end
 local function bindPlayer(target)
     if target == player then return end
 
-    connectExternal(target.CharacterAdded, function(character)
+    playerCharacterConnections[target] = connectExternal(target.CharacterAdded, function(character)
         task.delay(0.5, function()
             if gui.Parent and target.Parent == Players and target.Character == character then
                 updatePlayerVisual(target)
@@ -832,6 +832,11 @@ end
 connectExternal(Players.PlayerAdded, bindPlayer)
 connectExternal(Players.PlayerRemoving, function(target)
     clearPlayerVisual(target)
+    local connection = playerCharacterConnections[target]
+    if connection then
+        pcall(function() connection:Disconnect() end)
+        playerCharacterConnections[target] = nil
+    end
 end)
 
 for _, target in ipairs(Players:GetPlayers()) do
@@ -1348,7 +1353,6 @@ local shaderEffect
 local shaderBloomEffect
 local shaderParts = {}
 local shaderMaterialSession = false
-local shaderScanning = false
 local shaderMaterialToken = 0
 local shaderApplyToken = 0
 
@@ -1395,8 +1399,6 @@ local function restoreShaderMaterials()
     -- Invalidate any background scan/re-apply jobs before restoring properties.
     shaderMaterialToken += 1
     shaderApplyToken += 1
-    shaderScanning = false
-
     for part, original in pairs(shaderParts) do
         if part and part.Parent and original.LastApplied ~= nil then
             pcall(function()
@@ -1443,7 +1445,6 @@ local function applyShaderMaterials()
     -- should not freeze the UI when a visual toggle is enabled.
     if not shaderMaterialSession then
         shaderMaterialSession = true
-        shaderScanning = true
         shaderMaterialToken += 1
         local token = shaderMaterialToken
         task.spawn(function()
@@ -1457,9 +1458,7 @@ local function applyShaderMaterials()
                 end
                 if index % 180 == 0 then task.wait() end
             end
-            if token == shaderMaterialToken then
-                shaderScanning = false
-            end
+            -- The scan completed; future slider edits use the cached parts.
         end)
     else
         -- If a scan is in progress it keeps reading the current slider values;
@@ -1479,7 +1478,7 @@ end)
 local function applyShaderColor()
     local hasColorGrade = state.shaderContrast ~= 0 or state.shaderSaturation ~= 0
         or state.shaderBrightness ~= 0 or state.shaderHue ~= 0
-        or state.shaderShadows ~= 0 or state.shaderCurve ~= 0
+        or state.shaderShadows ~= 0
 
     if hasColorGrade then
         if not shaderEffect or not shaderEffect.Parent then
@@ -1492,7 +1491,7 @@ local function applyShaderColor()
         local tintStrength = math.clamp(math.abs(state.shaderHue) / 360, 0, 1) * 0.32
         local tint = Color3.fromHSV(hue, tintStrength, 1)
         shaderEffect.TintColor = tint
-        shaderEffect.Contrast = math.clamp(state.shaderContrast / 100 + state.shaderCurve / 200, -1, 1)
+        shaderEffect.Contrast = math.clamp(state.shaderContrast / 100, -1, 1)
         shaderEffect.Saturation = math.clamp(state.shaderSaturation / 100, -1, 1)
         -- Shadow lift is only an approximation through overall brightness.
         shaderEffect.Brightness = math.clamp(state.shaderBrightness / 100 + state.shaderShadows / 300, -1, 1)
@@ -1522,8 +1521,8 @@ local function buildShaders()
     clearPage()
 
     local intro = card(88)
-    textLabel(intro, "ШЕЙДЕРЫ И ЦВЕТОКОРРЕКЦИЯ", UDim2.fromOffset(16, 9), UDim2.new(1, -30, 0, 22), 12, C.text, true)
-    textLabel(intro, "Локальные эффекты: видишь их только ты. Настройки применяются сразу.", UDim2.fromOffset(16, 35), UDim2.new(1, -30, 0, 38), 9, C.muted)
+    textLabel(intro, "ГРАФИКА И ПОСТОБРАБОТКА", UDim2.fromOffset(16, 9), UDim2.new(1, -30, 0, 22), 12, C.text, true)
+    textLabel(intro, "Reflectance, цветокоррекция и Bloom. Это не произвольные GPU-шейдеры.", UDim2.fromOffset(16, 35), UDim2.new(1, -30, 0, 38), 9, C.muted)
 
     local function addValueControl(titleText, description, key, minValue, maxValue, step, suffix, callback)
         local f = card(72)
@@ -1570,19 +1569,18 @@ local function buildShaders()
     addValueControl("Яркость", "Общее осветление или затемнение", "shaderBrightness", -100, 100, 5, "", applyShaderColor)
     addValueControl("Цветовое тонирование", "Накладывает мягкий цветовой фильтр, а не вращает HSL каждого пикселя", "shaderHue", 0, 360, 5, "°", applyShaderColor)
     addValueControl("Поднятие теней", "Приближение через общую яркость; независимой коррекции теней нет", "shaderShadows", -100, 100, 5, "", applyShaderColor)
-    addValueControl("Свечение бликов", "Bloom для ярких областей; это свечение, не отражение", "shaderHighlights", 0, 100, 5, "", applyShaderColor)
-    addValueControl("Кривые", "Приближение RGB-кривой через контраст", "shaderCurve", -100, 100, 5, "", applyShaderColor)
+    addValueControl("Bloom", "Свечение ярких пикселей; не меняет отражения материалов", "shaderHighlights", 0, 100, 5, "", applyShaderColor)
 
     local reset = card(58)
     actionButton(reset, "СБРОСИТЬ ЦВЕТ", 14, 12, 116, function()
         state.shaderContrast = 0; state.shaderSaturation = 0; state.shaderBrightness = 0
-        state.shaderHue = 0; state.shaderShadows = 0; state.shaderHighlights = 0; state.shaderCurve = 0
+        state.shaderHue = 0; state.shaderShadows = 0; state.shaderHighlights = 0
         applyShaderColor(); buildShaders()
     end, true)
     actionButton(reset, "ВЫКЛЮЧИТЬ ВСЁ", 142, 12, 116, function()
         state.shaderGloss = false; state.shaderMatte = false
         state.shaderContrast = 0; state.shaderSaturation = 0; state.shaderBrightness = 0
-        state.shaderHue = 0; state.shaderShadows = 0; state.shaderHighlights = 0; state.shaderCurve = 0
+        state.shaderHue = 0; state.shaderShadows = 0; state.shaderHighlights = 0
         applyShaderMaterials(); applyShaderColor(); buildShaders()
     end, true)
     applyShaderColor()
@@ -1745,14 +1743,14 @@ showPage = function(name)
     pageDesc.Text = name == "Главная" and "Центр управления игровыми функциями"
         or name == "Визуалы" and "Подсветка игроков и эффекты персонажа"
         or name == "Движение" and "Скорость, прыжки, полёт и noclip"
-        or name == "Шейдеры" and "Графические эффекты и визуальные фильтры"
+        or name == "Графика" and "Отражение, цветокоррекция и Bloom"
         or "Внешний вид и параметры интерфейса"
     applyTheme()
     scroll.CanvasPosition = Vector2.new(0, 0)
     if name == "Главная" then buildHome()
     elseif name == "Визуалы" then buildVisuals()
     elseif name == "Движение" then buildMovement()
-    elseif name == "Шейдеры" then buildShaders()
+    elseif name == "Графика" then buildShaders()
     else buildSettings() end
 end
 for name, b in pairs(tabButtons) do
@@ -1868,7 +1866,6 @@ emergencyStop = function()
     state.shaderHue = 0
     state.shaderShadows = 0
     state.shaderHighlights = 0
-    state.shaderCurve = 0
     restoreShaderMaterials()
     applyShaderColor()
 
@@ -1890,6 +1887,8 @@ local function cleanup()
     for target in pairs(playerVisuals) do
         clearPlayerVisual(target)
     end
+    table.clear(playerVisuals)
+    table.clear(playerCharacterConnections)
     clearOwnEffects()
     restoreMovement()
     restoreShaderMaterials()
