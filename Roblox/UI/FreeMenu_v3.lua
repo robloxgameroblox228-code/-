@@ -1000,7 +1000,11 @@ local function stopFly()
     if flyVelocity then pcall(function() flyVelocity:Destroy() end); flyVelocity = nil end
     if flyGyro then pcall(function() flyGyro:Destroy() end); flyGyro = nil end
 
-    local character, humanoid = getMovementCharacter()
+    local character, humanoid, root = getMovementCharacter()
+    if root and flyCharacter == character then
+        -- Remove leftover momentum when Fly is switched off.
+        pcall(function() root.AssemblyLinearVelocity = Vector3.zero end)
+    end
     if humanoid and flyCharacter == character then
         local original = movementOriginal[humanoid]
         if original then humanoid.AutoRotate = original.AutoRotate ~= false end
@@ -1090,6 +1094,14 @@ connectExternal(UserInputService.InputEnded, function(input)
             shiftHeld = false
             applyMovementStats()
         end
+    end
+end)
+
+-- If Roblox loses window focus while Shift is held, InputEnded may not arrive.
+connectExternal(UserInputService.WindowFocusReleased, function()
+    if shiftHeld then
+        shiftHeld = false
+        applyMovementStats()
     end
 end)
 
@@ -1536,15 +1548,16 @@ scroll.InputChanged:Connect(function(input)
     end
 end)
 
+local emergencyStop -- forward declaration: the End-key callback is created before the function body
 connectExternal(UserInputService.InputBegan, function(input, processed)
     if processed then return end
     if input.KeyCode == Enum.KeyCode.End then
-        emergencyStop()
+        if emergencyStop then emergencyStop() end
     elseif input.KeyCode == Enum.KeyCode.Insert then
         if opened then closeMenu() else openMenu() end
     end
 end)
-local function emergencyStop()
+emergencyStop = function()
     -- Stop all character-affecting features and restore the values captured at activation.
     state.speedEnabled = false
     state.sprintEnabled = false
