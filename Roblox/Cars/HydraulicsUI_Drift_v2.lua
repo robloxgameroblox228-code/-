@@ -47,14 +47,12 @@ local LEAN = {
     RAMP_TIME = 0.9,
 }
 
--- Drift tuning. Suspension values are offsets from the live original FreeLength.
+-- Drift tuning. Suspension remains completely stock; only steering assist and launch boost are added.
 local DRIFT = {
-    OUTER_COMPRESS = 0.20, -- studs: shorten outer spring rest length during a turn
-    INNER_EXTEND  = 0.06, -- studs: slightly unload the inner side
     BOOST_ACCEL   = 28,   -- studs/s^2 forward acceleration while throttle is pressed
-    YAW_RATE      = 0.28, -- gentle yaw assistance at full steering and speed
-    YAW_MIN_SPEED = 8,
-    YAW_FULL_SPEED = 42,
+    YAW_RATE      = 0.38, -- slightly sharper yaw assistance at full steering and speed
+    YAW_MIN_SPEED = 7,
+    YAW_FULL_SPEED = 38,
     UPDATE_RATE   = 0.04,
 }
 
@@ -207,18 +205,7 @@ local function stopDrift()
         cleanTune(driftCar, "Tune_Drift")
         cleanTune(driftCar, "Tune_Drift_Yaw")
         cleanTune(driftCar, "Tune_Drift_Attachment")
-        local wheels = driftCar:FindFirstChild("Wheels")
-        if wheels then
-            for wheelName, originalLength in pairs(driftOriginalLengths or {}) do
-                local wheel = wheels:FindFirstChild(wheelName)
-                local spring = wheel and wheel:FindFirstChild("Spring")
-                if spring and spring:IsA("SpringConstraint") then
-                    pcall(function() spring.FreeLength = originalLength end)
-                end
-            end
-        end
     end
-    driftOriginalLengths = {}
     driftCar = nil
     updateButtons()
 end
@@ -314,11 +301,9 @@ local function toggleSway()
 end
 
 -- 4.3 ФИКСАЦИЯ НАКЛОНА (реальная, мягкая)
-local driftOriginalLengths = {}
-
 -- 4.4 DRIFT MODE
--- Outside springs compress during steering; inside springs unload slightly.
--- A bounded forward VectorForce improves launch without replacing the A-Chassis throttle.
+-- Stock suspension is left untouched. A bounded forward VectorForce improves launch
+-- and a slightly stronger yaw assist makes steering response sharper.
 local function toggleDrift()
     local car = getVehicle()
     if not car then warn("[HydraulicsUI] Сначала сядь на водительское место."); return end
@@ -330,22 +315,6 @@ local function toggleDrift()
     if isSwayOn then stopSway() end
     if isLeanOn then stopLean() end
     if isHydraOn then stopHydra() end
-
-    local wheels = car:FindFirstChild("Wheels")
-    if not wheels then warn("[HydraulicsUI] Не найдена папка Wheels."); return end
-
-    driftOriginalLengths = {}
-    for _, wheelName in ipairs({"FL", "FR", "RL", "RR"}) do
-        local wheel = wheels:FindFirstChild(wheelName)
-        local spring = wheel and wheel:FindFirstChild("Spring")
-        if spring and spring:IsA("SpringConstraint") then
-            driftOriginalLengths[wheelName] = spring.FreeLength
-        end
-    end
-    if next(driftOriginalLengths) == nil then
-        warn("[HydraulicsUI] Не найдены SpringConstraint Wheels.*.Spring.")
-        return
-    end
 
     local seat = player.Character and player.Character:FindFirstChildOfClass("Humanoid")
     seat = seat and seat.SeatPart
@@ -388,29 +357,6 @@ local function toggleDrift()
             local speed = chassis.AssemblyLinearVelocity.Magnitude
             local mass = getSafeMass(chassis)
 
-            -- Steering sign: positive is right, negative is left.
-            -- Right turn loads the left (outside) springs; left turn loads the right.
-            local turn = steer
-            local leftLoad = math.max(0, turn)
-            local rightLoad = math.max(0, -turn)
-            local compression = DRIFT.OUTER_COMPRESS
-            local extension = DRIFT.INNER_EXTEND
-
-            local offsets = {
-                FL = -compression * leftLoad + extension * rightLoad,
-                RL = -compression * leftLoad + extension * rightLoad,
-                FR = -compression * rightLoad + extension * leftLoad,
-                RR = -compression * rightLoad + extension * leftLoad,
-            }
-
-            for wheelName, originalLength in pairs(driftOriginalLengths) do
-                local wheel = wheels:FindFirstChild(wheelName)
-                local spring = wheel and wheel:FindFirstChild("Spring")
-                if spring and spring:IsA("SpringConstraint") then
-                    spring.FreeLength = math.max(0.2, originalLength + (offsets[wheelName] or 0))
-                end
-            end
-
             -- Launch assist only adds force while the driver is pressing forward.
             boost.Force = chassis.CFrame.LookVector * (mass * DRIFT.BOOST_ACCEL * throttle)
 
@@ -427,16 +373,6 @@ local function toggleDrift()
         if boost and boost.Parent then boost:Destroy() end
         if yaw and yaw.Parent then yaw:Destroy() end
         if attachment and attachment.Parent then attachment:Destroy() end
-        if driftCar then
-            for wheelName, originalLength in pairs(driftOriginalLengths) do
-                local wheel = wheels:FindFirstChild(wheelName)
-                local spring = wheel and wheel:FindFirstChild("Spring")
-                if spring and spring:IsA("SpringConstraint") then
-                    pcall(function() spring.FreeLength = originalLength end)
-                end
-            end
-        end
-        driftOriginalLengths = {}
         isDriftOn = false
         driftCar = nil
         updateButtons()
