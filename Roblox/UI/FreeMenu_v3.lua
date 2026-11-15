@@ -907,6 +907,8 @@ local movementOriginal = {}
 local noclipOriginal = {}
 local noclipDescAddedConnection
 local flyVelocity, flyOrientation, flyAttachment
+local liftForce, liftAttachment, liftConnection
+local liftEnabled = false
 local flyCharacter
 local shiftHeld = false
 
@@ -1072,8 +1074,48 @@ local function setFly(enabled)
     end
 end
 
+local function stopLift()
+    liftEnabled = false
+    if liftConnection then pcall(function() liftConnection:Disconnect() end); liftConnection = nil end
+    if liftForce then pcall(function() liftForce:Destroy() end); liftForce = nil end
+    if liftAttachment then pcall(function() liftAttachment:Destroy() end); liftAttachment = nil end
+end
+
+local function setLift(enabled)
+    if not enabled then
+        stopLift()
+        return false
+    end
+    stopLift()
+    local _, _, root = getMovementCharacter()
+    if not root or not root:IsA("BasePart") then
+        notify("Подъём", "Персонаж ещё не загружен")
+        return false
+    end
+    liftAttachment = Instance.new("Attachment")
+    liftAttachment.Name = "FreeMenuLiftAttachment"
+    liftAttachment.Parent = root
+    liftForce = Instance.new("VectorForce")
+    liftForce.Name = "FreeMenuLiftForce"
+    liftForce.Attachment0 = liftAttachment
+    liftForce.RelativeTo = Enum.ActuatorRelativeTo.World
+    liftForce.ApplyAtCenterOfMass = true
+    liftForce.Parent = root
+    liftEnabled = true
+    liftConnection = game:GetService("RunService").Heartbeat:Connect(function()
+        if not liftEnabled or not root.Parent or not liftForce or not liftForce.Parent then
+            stopLift()
+            return
+        end
+        -- Sustained upward thrust; it does not disable collisions or server-side validation.
+        liftForce.Force = Vector3.new(0, root.AssemblyMass * (workspace.Gravity + 85), 0)
+    end)
+    return true
+end
+
 local function restoreMovement()
     state.fly = false
+    stopLift()
     state.noclip = false
     shiftHeld = false
     stopFly()
@@ -1283,8 +1325,8 @@ local function buildMovement()
     end)
 
     local liftCard = card(66)
-    textLabel(liftCard, "Мгновенный подъём вверх", UDim2.fromOffset(16, 7), UDim2.new(1, -165, 0, 48), 10, C.muted, false)
-    actionButton(liftCard, "ПОДНЯТЬ", 14, 16, 132, function()
+    textLabel(liftCard, "Постоянный подъём вверх", UDim2.fromOffset(16, 7), UDim2.new(1, -165, 0, 48), 10, C.muted, false)
+    actionButton(liftCard, "ПОДЪЁМ: ВЫКЛ", 14, 16, 132, function()
         local character, humanoid, root = getMovementCharacter()
         if not character or not humanoid or not root or not root:IsA("BasePart") then
             notify("Подъём", "Персонаж ещё не загружен")
@@ -1298,7 +1340,8 @@ local function buildMovement()
         end)
         local velocity = root.AssemblyLinearVelocity
         root.AssemblyLinearVelocity = Vector3.new(velocity.X, 120, velocity.Z)
-        notify("Подъём", "Импульс вверх применён")
+        local enabled = setLift(not liftEnabled)
+        notify("Подъём", enabled and "Постоянный подъём включён" or "Подъём выключен")
     end)
 
     local info = card(72)
