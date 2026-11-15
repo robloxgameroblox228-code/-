@@ -346,9 +346,49 @@ local function start()
     end)
 end
 
-makeButton("СТАРТ", 10, 90, start)
-makeButton("СТОП", 108, 90, stop)
-makeButton("КОПИРОВАТЬ", 206, 105, function()
+-- Movement test: steady upward lift while enabled (does not bypass server authority or collisions).
+local liftEnabled = false
+local liftForce, liftAttachment, liftConnection
+local liftButton
+local function stopLift()
+    liftEnabled = false
+    if liftConnection then pcall(function() liftConnection:Disconnect() end); liftConnection = nil end
+    if liftForce then pcall(function() liftForce:Destroy() end); liftForce = nil end
+    if liftAttachment then pcall(function() liftAttachment:Destroy() end); liftAttachment = nil end
+    if liftButton then liftButton.Text = "ПОДЪЁМ: ВЫКЛ" end
+end
+local function startLift()
+    local char = player.Character
+    local root = char and char:FindFirstChild("HumanoidRootPart")
+    if not root or not root:IsA("BasePart") then
+        status.Text = "Подъём: персонаж ещё не готов"
+        return
+    end
+    stopLift()
+    liftAttachment = Instance.new("Attachment")
+    liftAttachment.Name = "TrainDiagnosticsLiftAttachment"
+    liftAttachment.Parent = root
+    liftForce = Instance.new("VectorForce")
+    liftForce.Name = "TrainDiagnosticsLiftForce"
+    liftForce.Attachment0 = liftAttachment
+    liftForce.RelativeTo = Enum.ActuatorRelativeTo.World
+    liftForce.ApplyAtCenterOfMass = true
+    liftForce.Parent = root
+    liftEnabled = true
+    liftButton.Text = "ПОДЪЁМ: ВКЛ"
+    liftConnection = RunService.Heartbeat:Connect(function()
+        if not liftEnabled or not root.Parent or not liftForce or not liftForce.Parent then
+            stopLift()
+            return
+        end
+        liftForce.Force = Vector3.new(0, root.AssemblyMass * (workspace.Gravity + 85), 0)
+    end)
+    status.Text = "Подъём включён • нажми кнопку ещё раз для остановки"
+end
+
+makeButton("СТАРТ", 10, 76, start)
+makeButton("СТОП", 91, 76, stop)
+makeButton("КОПИРОВАТЬ", 172, 92, function()
     if active then stop() end
     local full = "TRAIN DIAGNOSTICS LOG\n" .. (dropped > 0 and ("Dropped lines: " .. dropped .. "\n") or "") .. table.concat(lines, "\n")
     local clipboard
@@ -361,13 +401,16 @@ makeButton("КОПИРОВАТЬ", 206, 105, function()
         status.Text = "Буфер недоступен: лог показан в окне"
     end
 end)
-makeButton("ОЧИСТИТЬ", 319, 90, function()
+makeButton("ОЧИСТИТЬ", 269, 76, function()
     if active then stop() end
     lines, dropped = {}, 0
     setLogText("")
     status.Text = "ЛОГ ОЧИЩЕН"
 end)
-makeButton("ЗАКРЫТЬ", 417, 93, function()
+liftButton = makeButton("ПОДЪЁМ: ВЫКЛ", 350, 90, function()
+    if liftEnabled then stopLift() else startLift() end
+end)
+makeButton("ЗАКРЫТЬ", 445, 65, function()
     if active then stop() end
     if env.__TRAIN_DIAG_CLEANUP then env.__TRAIN_DIAG_CLEANUP() end
 end)
@@ -402,6 +445,7 @@ local cleaned = false
 local function cleanup()
     if cleaned then return end
     cleaned = true
+    stopLift()
     if active then stop() end
     pcall(function() dragConnection:Disconnect() end)
     pcall(function() ContextActionService:UnbindAction(TOGGLE_ACTION) end)
@@ -419,4 +463,5 @@ gui.Destroying:Connect(function()
     end
 end)
 
+player.CharacterRemoving:Connect(function() stopLift() end)
 status.Text = "ЗАПИСЬ ВЫКЛ • Insert — скрыть/показать"
