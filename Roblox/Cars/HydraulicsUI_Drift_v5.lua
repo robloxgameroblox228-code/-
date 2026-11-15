@@ -262,7 +262,6 @@ local function toggleHydra()
 
     if isHydraOn and hydraCar ~= car then stopHydra() end
     if isHydraOn then stopHydra(); return end
-    if isDriftOn then stopDrift() end
 
     isHydraOn = true; hydraCar = car; updateButtons()
 
@@ -301,7 +300,6 @@ local function toggleSway()
     if isSwayOn and swayCar ~= car then stopSway() end
     if isSwayOn then stopSway(); return end
     if isLeanOn then stopLean() end
-    if isDriftOn then stopDrift() end
 
     isSwayOn = true; swayCar = car; updateButtons()
 
@@ -450,7 +448,6 @@ local function toggleLean()
     if isLeanOn and leanCar ~= car then stopLean() end
     if isLeanOn then stopLean(); return end
     if isSwayOn then stopSway() end
-    if isDriftOn then stopDrift() end
 
     isLeanOn = true; leanCar = car
     local speedLimitRemoved = disableAChassisSpeedLimit(car)
