@@ -225,7 +225,10 @@ local function stopBrake()
     isBrakeOn = false
     safeCancel(brakeCoroutine)
     brakeCoroutine = nil
-    if brakeCar then cleanTune(brakeCar, "Tune_HardBrake") end
+    if brakeCar then
+        cleanTune(brakeCar, "Tune_HardBrake")
+        cleanTune(brakeCar, "Tune_HardBrake_Attachment")
+    end
     brakeCar = nil
     updateButtons()
 end
