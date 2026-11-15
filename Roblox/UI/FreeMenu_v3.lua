@@ -1326,22 +1326,15 @@ local function buildMovement()
 
     local liftCard = card(66)
     textLabel(liftCard, "Постоянный подъём вверх", UDim2.fromOffset(16, 7), UDim2.new(1, -165, 0, 48), 10, C.muted, false)
-    actionButton(liftCard, "ПОДЪЁМ: ВЫКЛ", 14, 16, 132, function()
-        local character, humanoid, root = getMovementCharacter()
-        if not character or not humanoid or not root or not root:IsA("BasePart") then
-            notify("Подъём", "Персонаж ещё не загружен")
-            return
+    actionButton(liftCard, liftEnabled and "ПОДЪЁМ: ВКЛ" or "ПОДЪЁМ: ВЫКЛ", 14, 16, 132, function()
+        if liftEnabled then
+            setLift(false)
+            notify("Подъём", "Выключен")
+        else
+            local enabled = setLift(true)
+            notify("Подъём", enabled and "Постоянный подъём включён" or "Не удалось включить")
         end
-
-        pcall(function()
-            humanoid.Sit = false
-            humanoid.PlatformStand = false
-            humanoid:ChangeState(Enum.HumanoidStateType.Jumping)
-        end)
-        local velocity = root.AssemblyLinearVelocity
-        root.AssemblyLinearVelocity = Vector3.new(velocity.X, 120, velocity.Z)
-        local enabled = setLift(not liftEnabled)
-        notify("Подъём", enabled and "Постоянный подъём включён" or "Подъём выключен")
+        buildMovement()
     end)
 
     local info = card(72)
