@@ -232,9 +232,13 @@ local function toggleHydra()
 
             if math.abs(ch.AssemblyLinearVelocity.Y) < 2 then
                 local mass = getSafeMass(ch)
-                -- A one-shot impulse gives the same nominal +10.5 studs/s vertical kick
-                -- without a lingering BodyVelocity fighting the chassis afterwards.
-                ch:ApplyImpulse(Vector3.new(0, mass * 10.5, 0))
+                local bv = Instance.new("BodyVelocity")
+                bv.Name = "Tune_Hydra"
+                bv.Velocity = Vector3.new(0, 10.5, 0)
+                bv.MaxForce = Vector3.new(0, math.max(mass * 500, 150000), 0)
+                bv.Parent = ch
+                task.wait(0.05)
+                if bv and bv.Parent then bv:Destroy() end
             end
             task.wait(0.4)
         end
