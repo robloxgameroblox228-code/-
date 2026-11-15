@@ -3,6 +3,7 @@
 
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
 
 local player = Players.LocalPlayer
 if not player then
@@ -47,6 +48,7 @@ gui.Name = GUI_NAME
 gui.ResetOnSpawn = false
 gui.IgnoreGuiInset = true
 gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+gui.Enabled = true
 gui.Parent = playerGui
 
 local panel = Instance.new("Frame")
@@ -58,6 +60,7 @@ panel.BorderSizePixel = 0
 panel.Active = true
 panel.Draggable = true
 panel.Parent = gui
+panel.Visible = false
 
 local panelCorner = Instance.new("UICorner")
 panelCorner.CornerRadius = UDim.new(0, 10)
@@ -212,12 +215,18 @@ toggleButton.Activated:Connect(function()
 end)
 
 closeButton.Activated:Connect(function()
-    disableLift()
-    if heartbeatConnection then
-        heartbeatConnection:Disconnect()
-        heartbeatConnection = nil
+    panel.Visible = false
+end)
+
+-- Insert shows or hides the control panel. The lift state is independent.
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
+    if gameProcessed then
+        return
     end
-    gui:Destroy()
+
+    if input.KeyCode == Enum.KeyCode.Insert then
+        panel.Visible = not panel.Visible
+    end
 end)
 
 updateButton()
