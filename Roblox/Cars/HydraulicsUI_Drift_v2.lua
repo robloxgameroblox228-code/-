@@ -205,6 +205,8 @@ local function stopDrift()
     driftCoroutine = nil
     if driftCar then
         cleanTune(driftCar, "Tune_Drift")
+        cleanTune(driftCar, "Tune_Drift_Yaw")
+        cleanTune(driftCar, "Tune_Drift_Attachment")
         local wheels = driftCar:FindFirstChild("Wheels")
         if wheels then
             for wheelName, originalLength in pairs(driftOriginalLengths or {}) do
