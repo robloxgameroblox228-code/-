@@ -49,11 +49,11 @@ local LEAN = {
 
 -- Drift tuning. Suspension remains completely stock; only steering assist and launch boost are added.
 local DRIFT = {
-    BOOST_ACCEL   = 28,   -- studs/s^2 forward acceleration while throttle is pressed
-    YAW_RATE      = 0.38, -- slightly sharper yaw assistance at full steering and speed
-    YAW_MIN_SPEED = 7,
-    YAW_FULL_SPEED = 38,
-    UPDATE_RATE   = 0.04,
+    BOOST_ACCEL   = 28,   -- keep the existing forward launch assist
+    YAW_RATE      = 0.62, -- stronger steering assistance
+    YAW_MIN_SPEED = 0,    -- assistance is available from a standstill
+    YAW_FULL_SPEED = 20,  -- reaches full assistance much sooner
+    UPDATE_RATE   = 0.03,
 }
 
 -- ==========================================
@@ -365,7 +365,9 @@ local function toggleDrift()
                 (speed - DRIFT.YAW_MIN_SPEED) / (DRIFT.YAW_FULL_SPEED - DRIFT.YAW_MIN_SPEED),
                 0, 1
             )
-            yaw.AngularVelocity = Vector3.new(0, -steer * DRIFT.YAW_RATE * speedFactor, 0)
+            -- Keep a useful amount of steering assistance even at very low speed.
+            local lowSpeedAssist = 0.70 + 0.30 * speedFactor
+            yaw.AngularVelocity = Vector3.new(0, -steer * DRIFT.YAW_RATE * lowSpeedAssist, 0)
 
             task.wait(DRIFT.UPDATE_RATE)
         end
