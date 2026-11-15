@@ -1107,7 +1107,6 @@ local function setLift(enabled)
             stopLift()
             return
         end
-        -- Sustained upward thrust; it does not disable collisions or server-side validation.
         liftForce.Force = Vector3.new(0, root.AssemblyMass * (workspace.Gravity + 85), 0)
     end)
     return true
@@ -1653,3 +1652,452 @@ local function diagLogCharacterConnections(character)
     if count == 0 then diagLine("CHAR CONNECTION: видимых локально соединений не найдено") end
 end
 local function diagLogAnimations(humanoid)
+    local animator = humanoid and humanoid:FindFirstChildOfClass("Animator")
+    if not animator then return end
+    local tracks = animator:GetPlayingAnimationTracks()
+    local parts = {}
+    for _, track in ipairs(tracks) do
+        local animationId = "unknown"
+        pcall(function()
+            if track.Animation then animationId = track.Animation.AnimationId end
+        end)
+        table.insert(parts, tostring(animationId) .. ":" .. tostring(track.Speed) .. ":" .. tostring(track.WeightCurrent))
+    end
+    local signature = table.concat(parts, "|")
+    if signature ~= diagnostics.lastAnimSignature then
+        diagnostics.lastAnimSignature = signature
+        if #tracks == 0 then
+            diagLine("ANIMATION: активных треков нет")
+        else
+            for _, track in ipairs(tracks) do
+                local animationId, animationName = "unknown", "unknown"
+                pcall(function()
+                    if track.Animation then
+                        animationId = track.Animation.AnimationId
+                        animationName = track.Animation.Name
+                    end
+                end)
+                diagLine("ANIMATION: id=" .. tostring(animationId)
+                    .. " | name=" .. tostring(animationName)
+                    .. " | speed=" .. tostring(track.Speed)
+                    .. " | weight=" .. tostring(track.WeightCurrent)
+                    .. " | priority=" .. tostring(track.Priority))
+            end
+        end
+    end
+end
+local function diagAttachCharacter(character)
+    if not diagnostics.active or not character then return end
+    diagLine("CHARACTER появился: " .. character.Name)
+    local humanoid = character:FindFirstChildOfClass("Humanoid") or character:WaitForChild("Humanoid", 5)
+    if humanoid and diagnostics.active then
+        table.insert(diagnostics.connections, humanoid.StateChanged:Connect(function(oldState, newState)
+            diagLine("СОСТОЯНИЕ: " .. tostring(oldState.Name) .. " -> " .. tostring(newState.Name))
+        end))
+        for _, property in ipairs({"WalkSpeed", "JumpPower", "JumpHeight", "HipHeight", "PlatformStand", "AutoRotate", "Sit", "Health"}) do
+            table.insert(diagnostics.connections, humanoid:GetPropertyChangedSignal(property):Connect(function()
+                if diagnostics.active then
+                    local value = humanoid[property]
+                    diagLine("HUMANOID." .. property .. " = " .. tostring(value))
+                end
+            end))
+        end
+    end
+end
+local function diagStart()
+    if diagnostics.active then return end
+    diagnostics.lines = {}
+    diagnostics.droppedLines = 0
+    diagnostics.sampleCount = 0
+    diagnostics.startedAt = os.clock()
+    diagnostics.lastPosition = nil
+    diagnostics.lastSampleAt = nil
+    diagnostics.clickedTarget = nil
+    diagnostics.clickedTargetAt = 0
+    diagnostics.lastMouseDown = {}
+    diagnostics.lastAnimSignature = ""
+    diagnostics.active = true
+    diagLine("=== FREE MENU DIAGNOSTICS START ===")
+    diagLine("PlaceId=" .. tostring(game.PlaceId) .. " | GameId=" .. tostring(game.GameId))
+    diagLine("Player=" .. player.Name .. " | UserId=" .. tostring(player.UserId))
+    diagLine("Пишутся только локальные данные; ничего никуда не отправляется.")
+    diagLine("Сэмплирование: 5 раз/сек; лимит буфера: 8000 строк.")
+    diagAttachCharacter(player.Character)
+    if player.Character then diagLogCharacterConnections(player.Character) end
+    table.insert(diagnostics.connections, player.CharacterAdded:Connect(function(character)
+        diagAttachCharacter(character)
+        task.delay(0.5, function()
+            if diagnostics.active and character.Parent then diagLogCharacterConnections(character) end
+        end)
+    end))
+    table.insert(diagnostics.connections, player.CharacterRemoving:Connect(function(character)
+        diagLine("CHARACTER удаляется: " .. character.Name)
+        diagnostics.lastPosition = nil
+        diagnostics.lastSampleAt = nil
+    end))
+    table.insert(diagnostics.connections, UserInputService.InputBegan:Connect(function(input, processed)
+        local kind = input.UserInputType
+        if kind == Enum.UserInputType.MouseMovement then return end
+        local now = os.clock()
+        diagLine("INPUT DOWN: " .. tostring(kind.Name) .. " / " .. tostring(input.KeyCode.Name) .. " | processed=" .. tostring(processed))
+        if kind == Enum.UserInputType.MouseButton1 or kind == Enum.UserInputType.MouseButton2 then
+            local buttonName = kind == Enum.UserInputType.MouseButton1 and "LMB" or "RMB"
+            diagnostics.lastMouseDown[buttonName] = now
+            local otherName = buttonName == "LMB" and "RMB" or "LMB"
+            if diagnostics.lastMouseDown[otherName] and math.abs(now - diagnostics.lastMouseDown[otherName]) <= 0.25 then
+                diagLine("ЗАЦЕП: ЛКМ + ПКМ нажаты почти одновременно (интервал <= 0.25 сек)")
+            end
+            local mouse = player:GetMouse()
+            local target, hit = nil, Vector3.zero
+            pcall(function()
+                target = mouse.Target
+                hit = mouse.Hit.Position
+            end)
+            diagnostics.clickedTarget = target
+            diagnostics.clickedTargetAt = now
+            diagTargetDetails(target, hit)
+        end
+    end))
+    table.insert(diagnostics.connections, UserInputService.InputEnded:Connect(function(input, processed)
+        local kind = input.UserInputType
+        if kind == Enum.UserInputType.MouseMovement then return end
+        diagLine("INPUT UP: " .. tostring(kind.Name) .. " / " .. tostring(input.KeyCode.Name) .. " | processed=" .. tostring(processed))
+    end))
+    table.insert(diagnostics.connections, UserInputService.WindowFocusReleased:Connect(function()
+        diagLine("WINDOW: потерян фокус окна")
+    end))
+    table.insert(diagnostics.connections, UserInputService.WindowFocused:Connect(function()
+        diagLine("WINDOW: окно снова в фокусе")
+    end))
+    task.spawn(function()
+        while diagnostics.active and gui.Parent do
+            local now = os.clock()
+            local character, humanoid, root = diagCharacter()
+            if humanoid and root and root:IsA("BasePart") then
+                diagLogAnimations(humanoid)
+                local position = root.Position
+                local velocity = root.AssemblyLinearVelocity
+                local deltaTime = diagnostics.lastSampleAt and (now - diagnostics.lastSampleAt) or 0
+                local distance = diagnostics.lastPosition and (position - diagnostics.lastPosition).Magnitude or 0
+                local horizontalSpeed = Vector3.new(velocity.X, 0, velocity.Z).Magnitude
+                local stateName = "Unknown"
+                pcall(function() stateName = humanoid:GetState().Name end)
+                local floorName = "Air"
+                pcall(function() floorName = humanoid.FloorMaterial.Name end)
+                local grounded = humanoid.FloorMaterial ~= Enum.Material.Air
+                local move = humanoid.MoveDirection
+                local line = string.format(
+                    "SAMPLE #%d | pos=%s | vel=%s | speed=%.2f (horizontal=%.2f) | moved=%.2f/%.3fs | moveDir=%s | state=%s | floor=%s | grounded=%s | health=%.1f | WalkSpeed=%.1f | JumpPower=%.1f | JumpHeight=%.1f | HipHeight=%.2f | Sit=%s | PlatformStand=%s | AutoRotate=%s | noclip=%s | fly=%s | sprint=%s",
+                    diagnostics.sampleCount + 1, diagVector(position), diagVector(velocity),
+                    velocity.Magnitude, horizontalSpeed, distance, deltaTime, diagVector(move),
+                    stateName, floorName, tostring(grounded), humanoid.Health,
+                    humanoid.WalkSpeed, humanoid.JumpPower, humanoid.JumpHeight, humanoid.HipHeight,
+                    tostring(humanoid.Sit), tostring(humanoid.PlatformStand), tostring(humanoid.AutoRotate),
+                    tostring(state.noclip), tostring(state.fly), tostring(state.sprintEnabled and shiftHeld)
+                )
+                diagLine(line)
+                local clickedTarget = diagnostics.clickedTarget
+                if clickedTarget and clickedTarget.Parent and (now - diagnostics.clickedTargetAt) <= 12 then
+                    local targetAssembly = clickedTarget.AssemblyRootPart or clickedTarget
+                    local targetVelocity = targetAssembly.AssemblyLinearVelocity
+                    local relativeVelocity = velocity - targetVelocity
+                    local relativePosition = position - clickedTarget.Position
+                    diagLine("TRAIN/TARGET TRACK | part=" .. diagPath(clickedTarget)
+                        .. " | playerPos=" .. diagVector(position)
+                        .. " | targetPos=" .. diagVector(clickedTarget.Position)
+                        .. " | relativePos=" .. diagVector(relativePosition)
+                        .. " | targetVel=" .. diagVector(targetVelocity)
+                        .. " | relativeVel=" .. diagVector(relativeVelocity)
+                        .. " | distance=" .. string.format("%.2f", relativePosition.Magnitude))
+                elseif clickedTarget and not clickedTarget.Parent then
+                    diagLine("TARGET LOST: выбранная деталь удалена из Workspace")
+                    diagnostics.clickedTarget = nil
+                end
+                if diagnostics.lastPosition and deltaTime > 0 then
+                    local measured = distance / deltaTime
+                    if distance > 10 and measured > 45 then
+                        diagLine(string.format("ПОДОЗРИТЕЛЬНЫЙ СКАЧОК: %.2f studs за %.3f сек (%.2f studs/s)", distance, deltaTime, measured))
+                    elseif distance > 5 and measured > 25 and horizontalSpeed < 8 then
+                        diagLine(string.format("ВОЗМОЖНЫЙ ОТКАТ/ТЕЛЕПОРТ: позиция изменилась на %.2f studs, текущая скорость %.2f", distance, horizontalSpeed))
+                    end
+                end
+                diagnostics.lastPosition = position
+                diagnostics.lastSampleAt = now
+                diagnostics.sampleCount += 1
+            else
+                diagLine("SAMPLE: персонаж или HumanoidRootPart отсутствует")
+                diagnostics.lastPosition = nil
+                diagnostics.lastSampleAt = nil
+            end
+            if diagnostics.uiStatus and diagnostics.uiStatus.Parent then
+                diagnostics.uiStatus.Text = string.format("ЗАПИСЬ: ВКЛ • %.1f сек • %d строк", os.clock() - diagnostics.startedAt, #diagnostics.lines)
+            end
+            task.wait(0.2)
+        end
+    end)
+end
+local function diagStop()
+    if not diagnostics.active then return end
+    diagLine("=== STOP: запись остановлена пользователем ===")
+    diagnostics.active = false
+    diagDisconnect()
+    if diagnostics.uiStatus and diagnostics.uiStatus.Parent then
+        diagnostics.uiStatus.Text = string.format("ЗАПИСЬ: ВЫКЛ • %d строк", #diagnostics.lines)
+    end
+end
+local function diagGetLog()
+    local header = "FREE MENU DIAGNOSTIC LOG\n"
+    if diagnostics.droppedLines > 0 then
+        header ..= "ВНИМАНИЕ: старые строки удалены из-за лимита буфера: " .. tostring(diagnostics.droppedLines) .. "\n"
+    end
+    return header .. table.concat(diagnostics.lines, "\n")
+end
+local function diagRefreshPreview()
+    if not diagnostics.uiPreview or not diagnostics.uiPreview.Parent then return end
+    local first = math.max(1, #diagnostics.lines - 44)
+    local preview = {}
+    for i = first, #diagnostics.lines do table.insert(preview, diagnostics.lines[i]) end
+    diagnostics.uiPreview.Text = #preview > 0 and table.concat(preview, "\n") or "Лог пока пуст. Нажми «ЗАПУСТИТЬ ЛОГ»."
+end
+local function buildDiagnostics()
+    clearPage()
+    local info = card(86)
+    textLabel(info, "ЛОКАЛЬНАЯ ДИАГНОСТИКА", UDim2.fromOffset(16, 9), UDim2.new(1, -30, 0, 22), 12, C.text, true)
+    textLabel(info, "Скорость, позиция, физика, состояние персонажа, кнопки, прыжки, падения и возможные откаты сервера.", UDim2.fromOffset(16, 34), UDim2.new(1, -30, 0, 42), 9, C.muted, false)
+
+    local statusCard = card(58)
+    diagnostics.uiStatus = textLabel(statusCard, diagnostics.active and "ЗАПИСЬ: ВКЛ" or string.format("ЗАПИСЬ: ВЫКЛ • %d строк", #diagnostics.lines), UDim2.fromOffset(16, 8), UDim2.new(1, -30, 0, 40), 11, diagnostics.active and state.accent or C.text, true)
+
+    local startCard = card(66)
+    textLabel(startCard, "Начать сбор событий и замеров", UDim2.fromOffset(16, 7), UDim2.new(1, -155, 0, 48), 10, C.muted, false)
+    actionButton(startCard, "ЗАПУСТИТЬ ЛОГ", 14, 16, 132, function()
+        diagStart()
+        if diagnostics.uiStatus then diagnostics.uiStatus.Text = "ЗАПИСЬ: ВКЛ" end
+        notify("Диагностика", "Запись запущена")
+    end)
+
+    local stopCard = card(66)
+    textLabel(stopCard, "Остановить запись и зафиксировать конец лога", UDim2.fromOffset(16, 7), UDim2.new(1, -155, 0, 48), 10, C.muted, false)
+    actionButton(stopCard, "ОСТАНОВИТЬ", 14, 16, 132, function()
+        diagStop()
+        diagRefreshPreview()
+        notify("Диагностика", "Запись остановлена")
+    end, true)
+
+    local copyCard = card(66)
+    textLabel(copyCard, "Скопировать весь лог целиком в буфер обмена", UDim2.fromOffset(16, 7), UDim2.new(1, -155, 0, 48), 10, C.muted, false)
+    actionButton(copyCard, "КОПИРОВАТЬ", 14, 16, 132, function()
+        if diagnostics.active then diagStop() end
+        local fullLog = diagGetLog()
+        local clipboard = sharedEnv.setclipboard or sharedEnv.toclipboard
+        if type(clipboard) == "function" then
+            local ok, err = pcall(clipboard, fullLog)
+            if ok then
+                notify("Готово", "Полный лог скопирован (" .. tostring(#fullLog) .. " символов)")
+            else
+                warn("[FREE MENU] Clipboard failed: " .. tostring(err))
+                if diagnostics.uiPreview and diagnostics.uiPreview.Parent then diagnostics.uiPreview.Text = fullLog end
+                notify("Буфер недоступен", "Полный лог открыт ниже: Ctrl+A и Ctrl+C")
+            end
+        else
+            if diagnostics.uiPreview and diagnostics.uiPreview.Parent then diagnostics.uiPreview.Text = fullLog end
+            notify("Буфер недоступен", "Полный лог открыт ниже: Ctrl+A и Ctrl+C")
+        end
+    end)
+
+    local clearCard = card(66)
+    textLabel(clearCard, "Удалить текущий лог из памяти меню", UDim2.fromOffset(16, 7), UDim2.new(1, -155, 0, 48), 10, C.muted, false)
+    actionButton(clearCard, "ОЧИСТИТЬ", 14, 16, 132, function()
+        if diagnostics.active then diagStop() end
+        diagnostics.lines = {}
+        diagnostics.droppedLines = 0
+        if diagnostics.uiStatus then diagnostics.uiStatus.Text = "ЗАПИСЬ: ВЫКЛ • 0 строк" end
+        diagRefreshPreview()
+        notify("Диагностика", "Лог очищен")
+    end, true)
+
+    local previewCard = card(210)
+    textLabel(previewCard, "ПОСЛЕДНИЕ СТРОКИ ЛОГА", UDim2.fromOffset(14, 8), UDim2.new(1, -28, 0, 20), 10, C.text, true)
+    local preview = make("TextBox", {
+        Position = UDim2.fromOffset(12, 34),
+        Size = UDim2.new(1, -24, 1, -44),
+        BackgroundColor3 = C.panel,
+        TextColor3 = C.muted,
+        Text = "",
+        PlaceholderText = "Лог пока пуст...",
+        Font = Enum.Font.Code,
+        TextSize = 9,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        TextYAlignment = Enum.TextYAlignment.Top,
+        TextWrapped = false,
+        TextEditable = true,
+        ClearTextOnFocus = false,
+        MultiLine = true,
+        ZIndex = 8
+    }, previewCard, "card")
+    round(preview, 8)
+    diagnostics.uiPreview = preview
+    diagRefreshPreview()
+end
+
+
+showPage = function(name)
+    activePage = name
+    pageTitle.Text = name
+    pageDesc.Text = name == "Главная" and "Центр управления игровыми функциями"
+        or name == "Визуалы" and "Подсветка игроков и эффекты персонажа"
+        or name == "Движение" and "Скорость, прыжки, полёт и noclip"
+        or name == "Диагностика" and "Локальный лог физики, движения и нажатий"
+        or "Внешний вид и параметры интерфейса"
+    applyTheme()
+    scroll.CanvasPosition = Vector2.new(0, 0)
+    if name == "Главная" then buildHome()
+    elseif name == "Визуалы" then buildVisuals()
+    elseif name == "Движение" then buildMovement()
+    elseif name == "Диагностика" then buildDiagnostics()
+    else buildSettings() end
+end
+for name, b in pairs(tabButtons) do
+    local tabName = name
+    b.Name = tabName
+    b.Activated:Connect(function() showPage(tabName) end)
+end
+
+local function openMenu()
+    if transitioning or opened then return end
+    transitioning = true
+    opened = true
+    unlockCursor()
+    window.Visible = true
+    shadow.Visible = true
+    local targetSize = maximized and UDim2.new(1,-28,1,-28) or UDim2.fromOffset(baseSize.X, baseSize.Y)
+    local targetPos = maximized and UDim2.fromOffset(14,14) or UDim2.new(0.5,-baseSize.X/2,0.5,-baseSize.Y/2)
+    windowScale.Scale = maximized and 1 or getDisplayScale()
+    window.Size = UDim2.fromOffset(28,28)
+    window.Position = targetPos
+    window.BackgroundTransparency = 1
+    tween(window, {Size = targetSize, Position = targetPos, BackgroundTransparency = state.transparency}, 0.22)
+    tween(shadow, {BackgroundTransparency = 0.72}, 0.22)
+    task.delay(state.animations and 0.24 or 0, function() transitioning = false end)
+end
+
+local draggingLauncher = false
+local launcherMoved = false
+local launcherStart, launcherPos
+launcher.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        draggingLauncher = true
+        launcherMoved = false
+        launcherStart = input.Position
+        launcherPos = launcher.Position
+        input.Changed:Connect(function()
+            if input.UserInputState == Enum.UserInputState.End then draggingLauncher = false end
+        end)
+    end
+end)
+connectExternal(UserInputService.InputChanged, function(input)
+    if draggingLauncher and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+        local delta = input.Position - launcherStart
+        if math.abs(delta.X) + math.abs(delta.Y) > 5 then launcherMoved = true end
+        launcher.Position = UDim2.new(launcherPos.X.Scale, launcherPos.X.Offset + delta.X, launcherPos.Y.Scale, launcherPos.Y.Offset + delta.Y)
+    end
+end)
+launcher.Activated:Connect(function()
+    if launcherMoved then launcherMoved = false; return end
+    if opened then closeMenu() else openMenu() end
+end)
+
+local draggingWindow = false
+local dragStart, windowStart
+top.InputBegan:Connect(function(input)
+    if input.Position.X >= top.AbsolutePosition.X + top.AbsoluteSize.X - 170 then return end
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        draggingWindow = true
+        dragStart = input.Position
+        windowStart = window.Position
+        input.Changed:Connect(function()
+            if input.UserInputState == Enum.UserInputState.End then draggingWindow = false end
+        end)
+    end
+end)
+connectExternal(UserInputService.InputChanged, function(input)
+    if draggingWindow and not maximized and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+        local d = input.Position - dragStart
+        window.Position = UDim2.new(windowStart.X.Scale, windowStart.X.Offset + d.X, windowStart.Y.Scale, windowStart.Y.Offset + d.Y)
+        shadow.Position = UDim2.new(window.Position.X.Scale, window.Position.X.Offset - 12, window.Position.Y.Scale, window.Position.Y.Offset - 12)
+    end
+end)
+
+-- ScrollingFrame already handles mouse-wheel input natively. Avoid a second
+-- wheel handler that competes with the built-in scroll behavior.
+
+local emergencyStop -- forward declaration: the End-key callback is created before the function body
+connectExternal(UserInputService.InputBegan, function(input, processed)
+    if processed then return end
+    if input.KeyCode == Enum.KeyCode.End then
+        if emergencyStop then emergencyStop() end
+    elseif input.KeyCode == Enum.KeyCode.Insert then
+        if opened then closeMenu() else openMenu() end
+    end
+end)
+emergencyStop = function()
+    -- Stop all character-affecting features and restore the values captured at activation.
+    state.speedEnabled = false
+    state.sprintEnabled = false
+    state.jumpEnabled = false
+    state.noclip = false
+    state.fly = false
+    shiftHeld = false
+
+    stopFly()
+    restoreNoclip()
+    restoreMovement()
+
+    state.playerESP = false
+    state.playerChams = false
+    refreshPlayerVisuals()
+
+    state.overheadHat = false
+    state.overheadTrail = false
+    state.overheadParticles = false
+    clearOwnEffects()
+
+    if showPage then showPage(activePage) end
+    notify("Аварийная остановка", "Движение, визуалы и фильтры отключены")
+end
+
+local cleaned = false
+local function cleanup()
+    if cleaned then return end
+    if diagnostics and diagnostics.active then diagStop() end
+    cleaned = true
+
+    restoreCursor()
+
+    for _, connection in ipairs(externalConnections) do
+        pcall(function() connection:Disconnect() end)
+    end
+    table.clear(externalConnections)
+
+    for target in pairs(playerVisuals) do
+        clearPlayerVisual(target)
+    end
+    table.clear(playerVisuals)
+    table.clear(playerCharacterConnections)
+    clearOwnEffects()
+    restoreMovement()
+    pcall(function()
+        if sharedEnv.__FREE_MENU_CLEANUP == cleanup then
+            sharedEnv.__FREE_MENU_CLEANUP = nil
+        end
+    end)
+end
+
+pcall(function()
+    sharedEnv.__FREE_MENU_CLEANUP = cleanup
+end)
+
+gui.Destroying:Connect(cleanup)
+
+showPage("Главная")
+applyTheme()
