@@ -4,6 +4,7 @@
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
+local ContextActionService = game:GetService("ContextActionService")
 
 local player = Players.LocalPlayer
 if not player then
@@ -18,7 +19,10 @@ local ATTACHMENT_NAME = "StandaloneLiftAttachment"
 -- Net upward acceleration in studs/second^2.
 local LIFT_ACCELERATION = 85
 
--- Remove remnants from an earlier run.
+-- Remove remnants and any keybind left by a previous execution.
+local ACTION_NAME = "StandaloneLiftToggle"
+ContextActionService:UnbindAction(ACTION_NAME)
+
 local oldGui = playerGui:FindFirstChild(GUI_NAME)
 if oldGui then
     oldGui:Destroy()
@@ -218,14 +222,36 @@ closeButton.Activated:Connect(function()
     panel.Visible = false
 end)
 
--- Insert shows or hides the control panel. The lift state is independent.
-UserInputService.InputBegan:Connect(function(input, gameProcessed)
-    if gameProcessed then
+-- Insert opens/closes the panel. Use both input routes because some
+-- experiences mark Insert as game-processed before UserInputService sees it.
+-- A short debounce prevents one keypress from toggling twice.
+local lastMenuToggle = 0
+local function togglePanel()
+    local now = os.clock()
+    if now - lastMenuToggle < 0.2 then
         return
     end
+    lastMenuToggle = now
+    panel.Visible = not panel.Visible
+end
 
+ContextActionService:BindActionAtPriority(
+    ACTION_NAME,
+    function(_, inputState)
+        if inputState == Enum.UserInputState.Begin then
+            togglePanel()
+            return Enum.ContextActionResult.Sink
+        end
+        return Enum.ContextActionResult.Pass
+    end,
+    false,
+    Enum.ContextActionPriority.High.Value + 1000,
+    Enum.KeyCode.Insert
+)
+
+UserInputService.InputBegan:Connect(function(input)
     if input.KeyCode == Enum.KeyCode.Insert then
-        panel.Visible = not panel.Visible
+        togglePanel()
     end
 end)
 
