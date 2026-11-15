@@ -23,10 +23,10 @@ end
 -- ==========================================
 -- 1. СОСТОЯНИЕ
 -- ==========================================
-local currentCar, hydraCar, swayCar, leanCar, driftCar = nil, nil, nil, nil, nil
-local isHydraOn, isSwayOn, isLeanOn, isDriftOn = false, false, false, false
-local hydraCoroutine, swayCoroutine, leanCoroutine, driftCoroutine = nil, nil, nil, nil
-local btnHydra, btnSway, btnLean, btnDrift
+local currentCar, hydraCar, swayCar, leanCar, driftCar, brakeCar = nil, nil, nil, nil, nil, nil
+local isHydraOn, isSwayOn, isLeanOn, isDriftOn, isBrakeOn = false, false, false, false, false
+local hydraCoroutine, swayCoroutine, leanCoroutine, driftCoroutine, brakeCoroutine = nil, nil, nil, nil, nil
+local btnHydra, btnSway, btnLean, btnDrift, btnBrake
 
 -- ==========================================
 -- 2. НАСТРОЙКИ (мягкость/амплитуда)
@@ -54,6 +54,12 @@ local DRIFT = {
     YAW_MIN_SPEED = 0,    -- assistance is available from a standstill
     YAW_FULL_SPEED = 20,  -- reaches full assistance much sooner
     UPDATE_RATE   = 0.03,
+}
+
+local BRAKE = {
+    DECELERATION = 95,
+    STOP_SPEED = 1.2,
+    UPDATE_RATE = 0.03,
 }
 
 -- ==========================================
@@ -174,6 +180,10 @@ local function updateButtons()
         btnDrift.BackgroundColor3 = isDriftOn and Color3.fromRGB(0, 200, 220) or Color3.fromRGB(30, 30, 30)
         btnDrift.TextColor3      = isDriftOn and Color3.fromRGB(0, 0, 0) or Color3.fromRGB(220, 220, 220)
     end
+    if btnBrake then
+        btnBrake.BackgroundColor3 = isBrakeOn and Color3.fromRGB(220, 75, 35) or Color3.fromRGB(30, 30, 30)
+        btnBrake.TextColor3 = isBrakeOn and Color3.fromRGB(255, 255, 255) or Color3.fromRGB(220, 220, 220)
+    end
 end
 
 -- ==========================================
@@ -208,6 +218,61 @@ local function stopDrift()
     end
     driftCar = nil
     updateButtons()
+end
+
+-- 4.0 РЕЗКОЕ ТОРМОЖЕНИЕ
+local function stopBrake()
+    isBrakeOn = false
+    safeCancel(brakeCoroutine)
+    brakeCoroutine = nil
+    if brakeCar then cleanTune(brakeCar, "Tune_HardBrake") end
+    brakeCar = nil
+    updateButtons()
+end
+
+local function toggleBrake()
+    local car = getVehicle()
+    if not car then warn("[HydraulicsUI] Сначала сядь на водительское место."); return end
+    local chassis = getChassis(car)
+    if not chassis then warn("[HydraulicsUI] Не удалось определить основную сборку машины."); return end
+    if isBrakeOn and brakeCar ~= car then stopBrake() end
+    if isBrakeOn then stopBrake(); return end
+
+    isBrakeOn = true
+    brakeCar = car
+    updateButtons()
+
+    local attachment = Instance.new("Attachment")
+    attachment.Name = "Tune_HardBrake_Attachment"
+    attachment.Parent = chassis
+
+    local force = Instance.new("VectorForce")
+    force.Name = "Tune_HardBrake"
+    force.Attachment0 = attachment
+    force.RelativeTo = Enum.ActuatorRelativeTo.World
+    force.ApplyAtCenterOfMass = true
+    force.Parent = chassis
+
+    brakeCoroutine = task.spawn(function()
+        while isBrakeOn do
+            local activeCar = getVehicle()
+            if not activeCar or activeCar ~= brakeCar or not chassis.Parent then break end
+            local velocity = chassis.AssemblyLinearVelocity
+            local horizontal = Vector3.new(velocity.X, 0, velocity.Z)
+            local speed = horizontal.Magnitude
+            if speed <= BRAKE.STOP_SPEED then
+                force.Force = Vector3.zero
+            else
+                force.Force = -horizontal.Unit * (getSafeMass(chassis) * BRAKE.DECELERATION)
+            end
+            task.wait(BRAKE.UPDATE_RATE)
+        end
+        if force and force.Parent then force:Destroy() end
+        if attachment and attachment.Parent then attachment:Destroy() end
+        isBrakeOn = false
+        brakeCar = nil
+        updateButtons()
+    end)
 end
 
 -- 4.1 ПОДПРЫГИВАНИЯ
@@ -457,6 +522,7 @@ local heartbeatConnection = RunService.Heartbeat:Connect(function()
         if isSwayOn then stopSway() end
         if isLeanOn then stopLean() end
         if isDriftOn then stopDrift() end
+        if isBrakeOn then stopBrake() end
         currentCar = v
     end
 end)
@@ -533,11 +599,12 @@ btnHydra = createBtn("🔽 ПОДПРЫГИВАНИЯ", 25, toggleHydra)
 btnSway  = createBtn("↔️ ПОКАЧИВАНИЯ",   60, toggleSway)
 btnLean  = createBtn("↘️ ФИКС. НАКЛОН",   95, toggleLean)
 btnDrift = createBtn("🏁 DRIFT MODE",    130, toggleDrift)
+btnBrake = createBtn("🛑 HARD BRAKE",     165, toggleBrake)
 
 local isMenuOpen = false
 local function toggleMenu()
     isMenuOpen = not isMenuOpen
-    local targetSize = isMenuOpen and UDim2.new(0, 150, 0, 165) or UDim2.new(0, 0, 0, 0)
+    local targetSize = isMenuOpen and UDim2.new(0, 150, 0, 200) or UDim2.new(0, 0, 0, 0)
     TweenService:Create(MainFrame, TweenInfo.new(0.2, Enum.EasingStyle.Quart, Enum.EasingDirection.Out), {Size = targetSize}):Play()
     TweenService:Create(ToggleBtn, TweenInfo.new(0.2), {Rotation = isMenuOpen and 90 or 0}):Play()
 end
@@ -585,6 +652,7 @@ local function shutdown(removeGui)
     stopSway()
     stopLean()
     stopDrift()
+    stopBrake()
 
     if heartbeatConnection then
         heartbeatConnection:Disconnect()
